@@ -120,7 +120,7 @@ async fn main() {
 
     // ── Detect Pi binary ──────────────────────────────────────────────
     let pi_bin = std::env::var("PI_BIN").unwrap_or_else(|_| "pi".into());
-    if !args.firecracker && !which::which(&pi_bin).ok().is_some() {
+    if !args.firecracker && which::which(&pi_bin).ok().is_none() {
         eprintln!(
             "Pi binary '{}' not found on PATH. Install pi first.",
             pi_bin

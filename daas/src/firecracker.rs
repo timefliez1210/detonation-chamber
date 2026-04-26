@@ -4,14 +4,12 @@
 //! and streams JSONL events back to the host. All honeypot files are copied
 //! into the VM before Pi starts.
 
-use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
-use tokio::io::AsyncBufReadExt;
 use tokio::process::Command;
 use tokio::time::sleep;
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::pi_agent::PiEvent;
@@ -53,7 +51,7 @@ pub struct FirecrackerVm {
     config: FirecrackerConfig,
     api_socket: PathBuf,
     vm_id: String,
-    serial_fifo: PathBuf,
+    _serial_fifo: PathBuf,
 }
 
 impl FirecrackerVm {
@@ -104,7 +102,7 @@ impl FirecrackerVm {
             config,
             api_socket,
             vm_id,
-            serial_fifo,
+            _serial_fifo: serial_fifo,
         };
 
         // Configure VM via API
@@ -135,6 +133,7 @@ impl FirecrackerVm {
         Ok(())
     }
 
+    #[allow(dead_code)]
     async fn api_post(&self, path: &str, body: serde_json::Value) -> Result<(), String> {
         let url = format!("http://localhost{}", path);
         let socket = self.api_socket.to_str().unwrap_or("");
