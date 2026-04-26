@@ -48,36 +48,50 @@ export default function (pi: ExtensionAPI) {
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       if (!isInstalled()) {
         return {
-          content: [
-            {
-              type: "text",
-              text:
-                "❌ `detonate` is not installed.\n\n" +
-                "Install it first:\n" +
-                "```bash\ncargo install --git https://github.com/your-org/detonation-tool\n```",
-            },
-          ],
-          details: {},
+          content: [ { type: "text", text:
+            "❌ `detonate` is not installed.\n\n" +
+            "Install it first:\n" +
+            "```bash\ncargo install --git https://github.com/timefliez1210/detonation-tool\n```",
+          }], details: {},
         };
       }
 
+      // ── Reuse Pi's LLM config if available ──────────────────────────
+      const provider =
+        process.env.PI_LLM_PROVIDER
+        || process.env.DAAS_LLM_PROVIDER
+        || (process.env.OPENAI_API_KEY ? "openai" : null)
+        || (process.env.ANTHROPIC_API_KEY ? "anthropic" : null)
+        || "ollama";
+
+      const model =
+        process.env.PI_LLM_MODEL
+        || process.env.DAAS_LLM_MODEL
+        || params.model
+        || (provider === "openai" ? "gpt-4o-mini"
+          : provider === "anthropic" ? "claude-sonnet-4-20250514"
+          : "llama3.2");
+
+      const providerFlag = `--provider ${provider}`;
+      const modelFlag = `--model ${model}`;
+      const maxTurns = params.max_turns || 10;
+      const escapedPayload = JSON.stringify(params.payload);
+
       onUpdate?.({
         content: [
-          { type: "text", text: "🔬 Spinning up detonation chamber..." },
+          { type: "text", text: `🔬 Spinning up detonation chamber (${provider}, ${model})...` },
         ],
       });
 
       try {
-        const maxTurns = params.max_turns || 10;
-        const modelFlag = params.model ? `--model ${params.model}` : "";
-        const escapedPayload = JSON.stringify(params.payload);
-
         const result = execSync(
-          `detonate ${escapedPayload} --output json --max-turns ${maxTurns} ${modelFlag}`,
+          `detonate ${escapedPayload} --output json --max-turns ${maxTurns} ${modelFlag} ${providerFlag}`,
           {
             encoding: "utf-8",
             timeout: 180_000,
             signal,
+            // Inherit parent env so API keys flow through
+            env: { ...process.env },
           }
         );
 
