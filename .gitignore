@@ -1,0 +1,30 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock
+*.rlib
+*.rmeta
+
+# Build artifacts
+dist/
+artifacts/
+
+# Large VM assets — NOT for git
+vm_assets/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test outputs
+*.log
+/tmp/
+autoresearch.jsonl
+

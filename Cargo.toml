@@ -1,0 +1,33 @@
+[package]
+name = "detonation-tool"
+version = "0.1.0"
+edition = "2021"
+authors = ["Detonation Tool Contributors"]
+description = "CLI tool for prompt injection and malware detection via honeypot sandboxing. Spins up a real Pi agent in a sandbox environment and monitors for exfiltration attempts."
+license = "Apache-2.0"
+repository = "https://github.com/your-org/detonation-tool"
+keywords = ["security", "prompt-injection", "sandbox", "honeypot", "llm"]
+categories = ["command-line-utilities", "development-tools"]
+
+[[bin]]
+name = "detonate"
+path = "src/main.rs"
+
+[[bin]]
+name = "generate-completions"
+path = "src/completions.rs"
+
+[dependencies]
+daas = { path = "../detontation_chamber/daas" }
+clap = { version = "4", features = ["derive", "cargo"] }
+clap_complete = "4"
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+chrono = { version = "0.4", features = ["serde"] }
+which = "8.0.2"
+
+[dev-dependencies]
+tempfile = "3"
