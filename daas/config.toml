@@ -1,0 +1,20 @@
+[server]
+host = "0.0.0.0"
+port = 8080
+
+[llm]
+api_base = "https://api.openai.com/v1"
+api_key = ""                            # set via DaaS_LLM_API_KEY env var
+default_model = "gpt-4o"
+max_tokens = 1024
+
+[sandbox]
+canary_count = 8
+timeout_secs = 120
+firecracker_bin = ""                     # empty = simulation mode (no VM)
+image_dir = "./images"
+
+[traffic_review]
+enabled = true
+model = ""                               # empty = uses llm.default_model
+max_tokens = 2048

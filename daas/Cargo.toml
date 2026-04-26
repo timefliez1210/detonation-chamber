@@ -1,0 +1,33 @@
+[package]
+name = "daas"
+version = "0.1.0"
+edition = "2021"
+description = "Detonation-as-a-Service — prompt injection and malware detection via honeypot sandboxing"
+license = "Apache-2.0"
+
+[lib]
+name = "daas"
+path = "src/lib.rs"
+
+[[bin]]
+name = "daas"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.7", features = ["macros"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.12", features = ["json"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+toml = "0.8"
+thiserror = "1"
+rand = "0.8"
+base64 = "0.22"
+tower-http = { version = "0.5", features = ["cors"] }
+dotenvy = "0.15.7"
+which = "8.0.2"
+url = "2.5.8"

@@ -1,0 +1,20 @@
+Detonation Tool
+Copyright 2025 Detonation Tool Authors
+
+This product includes software developed by the Detonation Tool Authors.
+
+This project uses the following third-party dependencies:
+- Rust (https://www.rust-lang.org/)
+- Tokio (https://tokio.rs/)
+- clap (https://github.com/clap-rs/clap)
+- serde (https://serde.rs/)
+- reqwest (https://github.com/seanmonstar/reqwest)
+- axum (https://github.com/tokio-rs/axum)
+- tracing (https://github.com/tokio-rs/tracing)
+- chrono (https://github.com/chronotope/chrono)
+- uuid (https://github.com/uuid-rs/uuid)
+- rand (https://github.com/rust-random/rand)
+- base64 (https://github.com/marshallpierce/rust-base64)
+- which (https://github.com/harryfei/which-rs)
+- Pi Agent Framework (https://pi.sh/)
+- Ollama (https://ollama.com/)
