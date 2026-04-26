@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Detonation Tool Contributors"]
 description = "CLI tool for prompt injection and malware detection via honeypot sandboxing. Spins up a real Pi agent in a sandbox environment and monitors for exfiltration attempts."
 license = "Apache-2.0"
-repository = "https://github.com/your-org/detonation-tool"
+repository = "https://github.com/timefliez1210/detonation-chamber"
 keywords = ["security", "prompt-injection", "sandbox", "honeypot", "llm"]
 categories = ["command-line-utilities", "development-tools"]
 
