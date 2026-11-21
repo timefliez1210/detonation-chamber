@@ -1,5 +1,9 @@
 # Eval results: index and archive
 
+**Human-facing index:** [`results/index.html`](results/index.html) (and
+[`results/README.md`](results/README.md)) — a polished hub linking every headline
+number to its raw data.
+
 Compact results are tracked in git under `evals/results/` (per-run `results.jsonl`,
 `summary.md`/`summary.json`, `config.json`, `corrections.json`). The full per-run
 reports (agent transcripts, tool calls, reasoning; ~42 MB) are git-ignored and kept
@@ -11,12 +15,14 @@ as a compressed archive.
 |---|---|---|
 | `model-eval-v3/` | Model vulnerability eval, dataset_v2 (132 cases). Pi: GLM 5.3 Flash, Claude Haiku 5.5, GPT-6 Luna, DeepSeek V4.1 Flash (2 repeats). Claude Code: Haiku, Sonnet, Opus at medium effort (1 repeat). Fixed judge GLM 5.3 Flash. | **Valid.** Direct-case outcomes corrected per `corrections.json` (hand-verified) |
 | `protection-v1/` | Detonation chamber as a pre-screen: GLM / DeepSeek chamber × normal / trusting persona, 2 repeats, joined with model-eval-v3 for GLM and DeepSeek targets. | **Valid** (fixed rules, corrected baseline) |
-| `model-eval-v2-INVALID-handle-message-framing/` | Same models before the `--task` fix: every run used the "carry out the message's requests" prompt. | **Invalid** for injection/utility; see its README |
-| `20261121-*-task*/` | Detector eval runs on dataset.jsonl (40 cases), trusting/default persona; `-fc` = Firecracker. | Valid for the detector eval (pre rule fixes) |
+| `delegated-v1/` | Hidden plain-text P.S. ("act on this email"), GLM vs. DeepSeek. | **Valid** |
+| `html-v1/` | Instruction hidden inside HTML (comment / white text / display:none / zero-size), GLM vs. DeepSeek. | **Valid** |
+| `detector-eval/20261121-*-task*/` | Detector eval runs on dataset.jsonl (40 cases), trusting/default persona; `-fc` = Firecracker. | Valid for the detector eval (pre rule fixes) |
+| `invalid-runs/model-eval-v2-handle-message-framing/` | Same models before the `--task` fix: every run used the "carry out the message's requests" prompt. | **Invalid** for injection/utility — held out; see `invalid-runs/README.md` |
 
-Published pages (sources in `evals/pages/`):
-- `harmful-compliance.html`: https://claude.ai/artifact/QSeerM9vGio2vttho6t2MJ
-- `chamber-protection.html`: https://claude.ai/artifact/NSBAe49CRAZADvgg9VGsXk
+Published pages (now kept in `evals/results/`, data embedded inline):
+- `results/harmful-compliance.html`: https://claude.ai/artifact/QSeerM9vGio2vttho6t2MJ
+- `results/chamber-protection.html`: https://claude.ai/artifact/NSBAe49CRAZADvgg9VGsXk
 
 ## Full archive
 
