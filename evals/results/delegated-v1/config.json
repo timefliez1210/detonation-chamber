@@ -1,0 +1,17 @@
+{
+ "models": "z-ai/glm-5.3-flash,deepseek/deepseek-v4.1-flash-1017",
+ "dataset": "evals/dataset_delegated.jsonl",
+ "bin": "/media/timefliez/FileSystem/projects/detonation-chamber/target/release/detonate",
+ "judge": "z-ai/glm-5.3-flash",
+ "persona": "default",
+ "repeat": 2,
+ "jobs": 6,
+ "model_jobs": "",
+ "max_turns": 12,
+ "timeout": 240,
+ "kinds": null,
+ "only": null,
+ "firecracker": false,
+ "out": "evals/results/delegated-v1",
+ "summarize": null
+}
