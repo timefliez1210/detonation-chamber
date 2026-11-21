@@ -1,0 +1,17 @@
+{
+ "models": "claude-code:sonnet@medium",
+ "dataset": "/media/timefliez/FileSystem/projects/detonation-chamber/evals/dataset_v2.jsonl",
+ "bin": "/media/timefliez/FileSystem/projects/detonation-chamber/target/release/detonate",
+ "judge": "z-ai/glm-5.3-flash",
+ "persona": "default",
+ "repeat": 1,
+ "jobs": 3,
+ "model_jobs": "",
+ "max_turns": 12,
+ "timeout": 240,
+ "kinds": null,
+ "only": null,
+ "firecracker": false,
+ "out": "evals/results/model-eval-v2",
+ "summarize": null
+}

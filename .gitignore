@@ -33,5 +33,11 @@ autoresearch.jsonl
 .env
 .env.*
 !.env.example
-evals/results/
+# Eval results: compact files (results.jsonl, summary.*, config.json,
+# corrections.json, README.md) are tracked; full per-run reports are large and
+# archived separately (see evals/RESULTS_ARCHIVE.md).
+evals/results/**/reports/
+evals/results/pilot/
+evals/results/smoke/
+evals/results/claude-code-smoke/
 evals/external/llmail/labelled_phase2.json
