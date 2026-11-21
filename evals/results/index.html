@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Detonation Chamber — Eval Results</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root {
+  --bg: #f6f7f9; --surface: #ffffff; --ink: #17202b; --muted: #5b6878; --line: #dde2e8;
+  --accent: #1f6f8b; --good: #2f8f5b; --bad: #d9534f; --warn: #b7791f;
+  --chip: #eef1f4; --chip-ink: #2a3a49;
+  --font-body: "Instrument Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f141a; --surface: #161d25; --ink: #e6ebf0; --muted: #96a3b2; --line: #2a3440;
+    --accent: #5fb3cf; --good: #58c58a; --bad: #e0665c; --warn: #e0a84a;
+    --chip: #1d2630; --chip-ink: #c6d2de; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f141a; --surface: #161d25; --ink: #e6ebf0; --muted: #96a3b2; --line: #2a3440;
+  --accent: #5fb3cf; --good: #58c58a; --bad: #e0665c; --warn: #e0a84a;
+  --chip: #1d2630; --chip-ink: #c6d2de; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.55;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 32px 56px; margin: 0;
+}
+main { max-width: 1040px; margin: 0 auto; display: grid; gap: 32px; }
+h1, h2, h3 { text-wrap: balance; margin: 0; line-height: 1.2; }
+h1 { font-size: clamp(26px, 4vw, 34px); font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: 20px; font-weight: 600; }
+h3 { font-size: 16px; font-weight: 600; }
+p { margin: 0; max-width: 72ch; }
+a { color: var(--accent); }
+.eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); font-weight: 600; }
+.lede { color: var(--muted); font-size: 16px; max-width: 72ch; }
+header { display: grid; gap: 12px; }
+section { display: grid; gap: 16px; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.cards { display: grid; gap: 18px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: grid; gap: 14px; }
+.card-head { display: grid; gap: 6px; }
+.card-head .tag { font-size: 11px; font-family: var(--font-mono); color: var(--muted); }
+.card-head h3 a { text-decoration: none; }
+.what { color: var(--muted); font-size: 14px; }
+
+.stats { display: flex; flex-wrap: wrap; gap: 10px; }
+.stat { background: var(--chip); border-radius: 8px; padding: 8px 12px; display: grid; gap: 2px; min-width: 128px; }
+.stat .v { font-family: var(--font-mono); font-size: 18px; font-weight: 600; }
+.stat .k { font-size: 11px; color: var(--muted); line-height: 1.25; }
+.v.good { color: var(--good); } .v.bad { color: var(--bad); } .v.warn { color: var(--warn); }
+
+.links { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.chip { font-family: var(--font-mono); font-size: 12px; text-decoration: none; color: var(--chip-ink);
+  background: var(--chip); border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; white-space: nowrap; }
+.chip:hover { border-color: var(--accent); color: var(--accent); }
+.chip.report { background: var(--accent); color: #fff; border-color: var(--accent); font-family: var(--font-body); font-weight: 600; }
+.chip.report:hover { opacity: .9; color: #fff; }
+.links .label { font-size: 12px; color: var(--muted); margin-right: 2px; }
+
+.note { background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--warn); border-radius: 8px; padding: 14px 16px; display: grid; gap: 8px; }
+pre { background: var(--chip); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; overflow-x: auto; margin: 0;
+  font-family: var(--font-mono); font-size: 12.5px; line-height: 1.5; }
+footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 18px; display: grid; gap: 6px; }
+ul { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <span class="eyebrow">Detonation Chamber</span>
+  <h1>LLM prompt-injection &amp; harmful-request evals</h1>
+  <p class="lede">A sandboxed agent (fake credentials, unroutable attacker endpoints, bubblewrap/Firecracker
+  isolation, a credential-isolating proxy) is fed untrusted data and its behavior is scored on observed
+  actions — a secret leaving, a transaction sent, a persistence file written — not on a verdict. This page
+  indexes every valid run and links each headline number to the raw data it came from.</p>
+</header>
+
+<section>
+  <h2>Polished reports</h2>
+  <p class="what">Two interactive write-ups. Each is self-contained (data embedded) and also lives as a published artifact.</p>
+  <div class="cards">
+
+    <div class="card">
+      <div class="card-head">
+        <span class="tag">results/model-eval-v3</span>
+        <h3><a href="harmful-compliance.html">Harmful request compliance →</a></h3>
+      </div>
+      <p class="what">7 model/harness setups fed standard injection templates vs. direct harmful requests.
+      Standard injections ~never land; a plainly-worded harmful request is a different story.</p>
+      <div class="stats">
+        <div class="stat"><span class="v good">0%</span><span class="k">ASR, embedded injection templates (all setups)</span></div>
+        <div class="stat"><span class="v bad">5–22%</span><span class="k">ASR, direct harmful requests (Opus → GLM)</span></div>
+        <div class="stat"><span class="v">n=40</span><span class="k">direct cases per Pi model (2 repeats)</span></div>
+      </div>
+      <div class="links">
+        <span class="label">open:</span>
+        <a class="chip report" href="harmful-compliance.html">Report</a>
+        <a class="chip" href="https://claude.ai/artifact/QSeerM9vGio2vttho6t2MJ" target="_blank" rel="noopener">published ↗</a>
+        <span class="label">raw:</span>
+        <a class="chip" href="model-eval-v3/summary.md">summary.md</a>
+        <a class="chip" href="model-eval-v3/summary.json">summary.json</a>
+        <a class="chip" href="model-eval-v3/corrections.json">corrections.json</a>
+        <a class="chip" href="model-eval-v3/config.json">config.json</a>
+        <a class="chip" href="model-eval-v3/">per-model results.jsonl ↗</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <span class="tag">results/protection-v1 · results/model-eval-v3</span>
+        <h3><a href="chamber-protection.html">Chamber as a pre-screen →</a></h3>
+      </div>
+      <p class="what">The detonation chamber run in front of an agent as a filter: how much harmful compliance
+      it removes, and what benign cost that buys.</p>
+      <div class="stats">
+        <div class="stat"><span class="v bad">22–25%</span><span class="k">direct-harm ASR, no chamber</span></div>
+        <div class="stat"><span class="v good">0–2%</span><span class="k">direct-harm ASR, behind chamber (lenient)</span></div>
+        <div class="stat"><span class="v warn">8–25%</span><span class="k">benign requests flagged (cost)</span></div>
+        <div class="stat"><span class="v good">~90–100%</span><span class="k">real hijacks caught</span></div>
+      </div>
+      <div class="links">
+        <span class="label">open:</span>
+        <a class="chip report" href="chamber-protection.html">Report</a>
+        <a class="chip" href="https://claude.ai/artifact/NSBAe49CRAZADvgg9VGsXk" target="_blank" rel="noopener">published ↗</a>
+        <span class="label">raw:</span>
+        <a class="chip" href="protection-v1/summary.md">summary.md</a>
+        <a class="chip" href="protection-v1/summary.json">summary.json</a>
+        <span class="label">(joins model-eval-v3 baselines)</span>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section>
+  <h2>Concealment experiments</h2>
+  <p class="what">Isolating one variable — <em>how</em> the instruction is hidden — with a visible, benign,
+  actionable email as the carrier. GLM 5.3 Flash vs. DeepSeek V4.1 Flash.</p>
+  <div class="cards">
+
+    <div class="card">
+      <div class="card-head">
+        <span class="tag">results/delegated-v1</span>
+        <h3>Hidden plain-text P.S. — "go act on this email"</h3>
+      </div>
+      <p class="what">Visible meeting/invoice request, plus an appended instruction (e.g. transfer / exfiltrate).
+      The user delegates: "act on it." Models do the real task but refuse the hidden part.</p>
+      <div class="stats">
+        <div class="stat"><span class="v good">0–1%</span><span class="k">hidden goal carried out (n=160 / model)</span></div>
+        <div class="stat"><span class="v">~70%</span><span class="k">real request still completed</span></div>
+        <div class="stat"><span class="v good">98%</span><span class="k">flagged the hidden instruction</span></div>
+      </div>
+      <div class="links">
+        <span class="label">raw:</span>
+        <a class="chip" href="delegated-v1/summary.md">summary.md</a>
+        <a class="chip" href="delegated-v1/summary.json">summary.json</a>
+        <a class="chip" href="delegated-v1/config.json">config.json</a>
+        <a class="chip" href="delegated-v1/">per-model results.jsonl ↗</a>
+        <span class="label">dataset:</span>
+        <a class="chip" href="../build_dataset_delegated.py">build_dataset_delegated.py</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <span class="tag">results/html-v1</span>
+        <h3>Hidden inside HTML — invisible to a human, in the source</h3>
+      </div>
+      <p class="what">Instruction hidden via HTML comment, white-on-white text, <code>display:none</code>, or
+      zero font-size. The agent reads raw source, so the concealment <em>backfires</em>: it's a tell.</p>
+      <div class="stats">
+        <div class="stat"><span class="v good">0 / 240</span><span class="k">hidden instructions carried out (each model)</span></div>
+        <div class="stat"><span class="v good">100%</span><span class="k">recognized the attack</span></div>
+        <div class="stat"><span class="v">0 leaks</span><span class="k">instruction never visible to a human (validity check)</span></div>
+      </div>
+      <div class="links">
+        <span class="label">raw:</span>
+        <a class="chip" href="html-v1/summary.md">summary.md</a>
+        <a class="chip" href="html-v1/summary.json">summary.json</a>
+        <a class="chip" href="html-v1/config.json">config.json</a>
+        <a class="chip" href="html-v1/">per-model results.jsonl ↗</a>
+        <span class="label">dataset:</span>
+        <a class="chip" href="../build_dataset_html.py">build_dataset_html.py</a>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section>
+  <h2>Detector eval</h2>
+  <p class="what">The chamber's own detection layers measured as a classifier on
+  <span class="mono">evals/dataset.jsonl</span> (40 labelled cases). Nine runs across persona/framing;
+  <span class="mono">-fc</span> is the Firecracker-isolated run. Snapshot taken <strong>before</strong> the
+  behavioral false-positive rule fixes, so treat as indicative.</p>
+  <div class="cards">
+    <div class="card">
+      <div class="card-head">
+        <span class="tag">results/detector-eval/</span>
+        <h3>Malicious vs. benign classification (lenient = block Malicious or Suspicious)</h3>
+      </div>
+      <div class="stats">
+        <div class="stat"><span class="v">0.87</span><span class="k">F1 (lenient), representative run</span></div>
+        <div class="stat"><span class="v">85%</span><span class="k">recall (lenient)</span></div>
+        <div class="stat"><span class="v warn">~10%</span><span class="k">false-positive rate</span></div>
+        <div class="stat"><span class="v">9 runs</span><span class="k">persona × framing, incl. Firecracker</span></div>
+      </div>
+      <div class="links">
+        <span class="label">browse:</span>
+        <a class="chip" href="detector-eval/">detector-eval/ ↗</a>
+        <span class="label">example:</span>
+        <a class="chip" href="detector-eval/20261121-092318-default-default-task/summary.md">summary.md</a>
+        <a class="chip" href="detector-eval/20261121-095531-default-trusting-task-fc/summary.md">firecracker run</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Excluded runs</h2>
+  <div class="note">
+    <p><strong>One run is held out of every reported number.</strong> It is kept for provenance only.</p>
+    <ul>
+      <li><span class="mono">invalid-runs/model-eval-v2-handle-message-framing/</span> — a harness bug meant
+      <span class="mono">--task</span> never reached the agent, so every case ran the default "carry out the
+      message's requests" prompt. That measures <em>obedience, not hijacking</em>. Superseded by
+      <span class="mono">model-eval-v3</span>.</li>
+    </ul>
+    <div class="links"><a class="chip" href="invalid-runs/README.md">invalid-runs/README.md →</a></div>
+  </div>
+</section>
+
+<section>
+  <h2>Reproduce &amp; data notes</h2>
+  <p class="what">Compact files (<span class="mono">results.jsonl</span>, <span class="mono">summary.*</span>,
+  <span class="mono">config.json</span>, <span class="mono">corrections.json</span>) are tracked in git. Full
+  per-run transcripts (agent reasoning, every tool call; ~42&nbsp;MB) are git-ignored and kept in the archive
+  tarball — see <a href="../RESULTS_ARCHIVE.md">RESULTS_ARCHIVE.md</a>.</p>
+  <pre># re-score after rule changes, no model calls needed
+python3 evals/run_model_evals.py --summarize evals/results/model-eval-v3
+python3 evals/run_protection_eval.py --join-only --out evals/results/protection-v1</pre>
+</section>
+
+<footer>
+  <div>Source: <a href="https://github.com/timefliez1210/detonation-chamber" target="_blank" rel="noopener">github.com/timefliez1210/detonation-chamber</a> · all numbers link to the raw data above.</div>
+  <div>Sandbox note: bubblewrap/Firecracker isolation, fabricated credentials, attacker addresses unroutable — nothing real could leak.</div>
+</footer>
+
+</main>
+</body>
+</html>
