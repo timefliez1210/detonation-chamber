@@ -266,6 +266,9 @@ pub fn analyze_events(
     // Files the agent wrote (normalized path → content), to analyze scripts
     // when they are executed later.
     let mut written: Vec<(String, String)> = Vec::new();
+    // Set once the agent points a git remote at an external URL; a later
+    // `git push` then sends the repository out.
+    let mut external_remote = false;
 
     for event in pi_events {
         match event {
@@ -337,6 +340,18 @@ pub fn analyze_events(
                         let mut flags = BehavioralAnalyzer::analyze_bash_command(command);
                         if !seen.is_empty() {
                             flags.extend(BehavioralAnalyzer::analyze_after_secret_access(command));
+                        }
+                        // Code pushed to an external git remote (repo exfiltration).
+                        if BehavioralAnalyzer::adds_external_git_remote(command) {
+                            external_remote = true;
+                        }
+                        if BehavioralAnalyzer::pushes_to_external_remote(command, external_remote) {
+                            flags.push(crate::behavioral::BehavioralFlag {
+                                flag_type: crate::behavioral::BehavioralFlagType::SecretFileNetworkSend,
+                                severity: Severity::Critical,
+                                description: "Repository pushed to an external git remote — code exfiltration".into(),
+                                raw_command: Some(command.to_string()),
+                            });
                         }
                         // Executing a script the agent wrote earlier?
                         for (path, content) in &written {

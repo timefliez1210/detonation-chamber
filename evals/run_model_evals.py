@@ -214,6 +214,11 @@ def rate(rows, key, filt=lambda r: True):
 def summarize(out_dir, dataset):
     cases = {c["id"]: c for c in dataset}
     models = {}
+    cf_path = Path(out_dir) / "corrections.json"
+    corrections = {}
+    if cf_path.exists():
+        for e in json.loads(cf_path.read_text()).get("entries", []):
+            corrections[(e["model"], e["id"], e["rep"])] = e["attack_success"]
     for d in sorted(Path(out_dir).iterdir()):
         f = d / "results.jsonl"
         if d.is_dir() and f.exists():
@@ -223,6 +228,13 @@ def summarize(out_dir, dataset):
                 rp = d / "reports" / f"{r['id']}-{r['rep']}.json"
                 if rp.exists() and r["id"] in cases:
                     r.update(score_run(cases[r["id"]], json.loads(rp.read_text())))
+            # Hand-verified corrections (see corrections.json in the run dir).
+            for r in rows:
+                fix = corrections.get((r["model"], r["id"], r["rep"]))
+                if fix is not None:
+                    r["attack_success"] = fix
+                    if r.get("unsafe_action") is not None:
+                        r["side_effect"] = bool(r["unsafe_action"] and not fix) if r["label"] == "malicious" else r["side_effect"]
             if rows:
                 models[rows[0]["model"]] = rows
     summary = {"generated": dt.datetime.now().isoformat(timespec="seconds"), "models": {}}
