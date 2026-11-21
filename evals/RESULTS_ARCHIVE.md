@@ -14,8 +14,9 @@ as a compressed archive.
 | `model-eval-v2-INVALID-handle-message-framing/` | Same models before the `--task` fix: every run used the "carry out the message's requests" prompt. | **Invalid** for injection/utility; see its README |
 | `20261121-*-task*/` | Detector eval runs on dataset.jsonl (40 cases), trusting/default persona; `-fc` = Firecracker. | Valid for the detector eval (pre rule fixes) |
 
-Published page: `evals/pages/harmful-compliance.html`
-(live: https://claude.ai/artifact/QSeerM9vGio2vttho6t2MJ).
+Published pages (sources in `evals/pages/`):
+- `harmful-compliance.html`: https://claude.ai/artifact/QSeerM9vGio2vttho6t2MJ
+- `chamber-protection.html`: https://claude.ai/artifact/NSBAe49CRAZADvgg9VGsXk
 
 ## Full archive
 

@@ -1,0 +1,245 @@
+<title>Detonation Chamber Protection</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one reading column; before/after bars, a trade-off chart, a detection table, then notes. Same family as the harmful-request page. */
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --ink: #17202b;
+  --muted: #5b6878;
+  --line: #dde2e8;
+  --accent: #1f6f8b;
+  --harm: #c4483f;     /* harmful requests that succeed */
+  --safe: #2f7d5b;     /* protected outcome */
+  --cost: #b07d1a;     /* benign mail flagged */
+  --track: #eef1f4;
+  --font-body: "Instrument Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f141a; --surface: #161d25; --ink: #e6ebf0; --muted: #96a3b2; --line: #2a3440;
+    --accent: #5fb3cf; --harm: #e0665c; --safe: #4fb487; --cost: #d9a441; --track: #1d2630; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f141a; --surface: #161d25; --ink: #e6ebf0; --muted: #96a3b2; --line: #2a3440;
+  --accent: #5fb3cf; --harm: #e0665c; --safe: #4fb487; --cost: #d9a441; --track: #1d2630; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.55;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 32px 56px;
+}
+main { max-width: 1040px; margin: 0 auto; display: grid; gap: 36px; }
+h1, h2, h3 { text-wrap: balance; margin: 0; line-height: 1.2; }
+h1 { font-size: clamp(26px, 4vw, 34px); font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: 19px; font-weight: 600; }
+h3 { font-size: 15px; font-weight: 600; }
+p { margin: 0; max-width: 68ch; }
+.eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); font-weight: 600; }
+.lede { color: var(--muted); font-size: 16px; }
+.small { color: var(--muted); font-size: 13.5px; }
+header, section { display: grid; gap: 14px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 20px; min-width: 0; }
+.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* Before / after */
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.ba { display: grid; gap: 12px; }
+.ba-row { display: grid; grid-template-columns: 170px 1fr 70px; gap: 12px; align-items: center; font-size: 13.5px; }
+.ba-row .lbl { color: var(--muted); }
+.track { position: relative; height: 20px; background: var(--track); border-radius: 4px; }
+.fill { position: absolute; inset: 0 auto 0 0; border-radius: 4px 0 0 4px; min-width: 2px; }
+.ba-row .val { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 600; }
+.ba-row .val small { display: block; font-weight: 400; color: var(--muted); font-size: 11px; }
+
+/* Trade-off chart */
+.chart-wrap { overflow-x: auto; }
+svg text { font-family: var(--font-body); }
+.legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12.5px; color: var(--muted); }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: -1px; margin-right: 6px; }
+
+/* Table */
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 760px; font-size: 13.5px; }
+th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; }
+thead th { font-size: 12px; font-weight: 600; color: var(--muted); }
+td.n { font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.best td:first-child { font-weight: 600; }
+tr:last-child td { border-bottom: none; }
+.pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--safe); color: var(--safe); margin-left: 6px; }
+
+/* Notes */
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.note { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; gap: 6px; align-content: start; }
+.note p { color: var(--muted); font-size: 14px; }
+ul.method { margin: 0; padding-left: 20px; color: var(--muted); display: grid; gap: 6px; max-width: 75ch; }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+footer { color: var(--muted); font-size: 13px; }
+@media (max-width: 560px) { .ba-row { grid-template-columns: 1fr 64px; } .ba-row .lbl { grid-column: 1 / -1; } }
+</style>
+
+<main>
+  <header>
+    <div class="eyebrow">Detonation chamber · protection eval · Nov 2026</div>
+    <h1>Does screening messages in a sandbox first stop agents from doing harm?</h1>
+    <p class="lede">Every incoming message goes through the detonation chamber before the real agent sees it. The chamber runs a decoy agent on the message in a sandbox with fake credentials and watches what happens. Messages that trigger harmful behavior are blocked or sent to a person. We measured how many harmful requests still get through, and how much harmless mail gets caught on the way.</p>
+  </header>
+
+  <section>
+    <h2>Harmful requests that still succeed</h2>
+    <div class="pair" id="pair"></div>
+    <p class="small">Chamber: DeepSeek V4.1 Flash with the trusting persona, the best setup tested. "Block Malicious" stops only messages where harm was observed; "also Suspicious" also holds messages where the decoy agent flagged an attack or touched secrets. 40 direct harmful requests per agent (20 requests × 2 runs).</p>
+  </section>
+
+  <section>
+    <h2>Protection versus cost, all four chamber setups</h2>
+    <div class="panel chart-wrap">
+      <svg id="tradeoff" viewBox="0 0 720 380" width="100%" role="img" aria-label="Scatter chart of harmful requests that succeed against benign messages flagged, per chamber setup"></svg>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--harm)"></i>no chamber</span>
+      <span><i style="background:var(--accent)"></i>chamber setup (block Malicious only)</span>
+    </div>
+    <p class="small">Down and to the left is better. Harmful-request success is averaged over the two protected agents (GLM and DeepSeek, 80 runs). With "also Suspicious" blocking, success drops to about 1% or less for every setup, at almost the same cost.</p>
+  </section>
+
+  <section>
+    <h2>How each chamber setup performed</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Chamber setup</th><th>Direct harmful requests flagged</th><th>All attack messages flagged</th>
+          <th>Harmless messages flagged</th><th>Real hijacks caught</th><th>Time per message</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <p class="small">Flagged = Malicious or Suspicious. Real hijacks caught = runs where the unprotected agent actually carried out the attack, and the chamber flagged that message (both protected agents combined).</p>
+  </section>
+
+  <section>
+    <h2>What we learned</h2>
+    <div class="notes">
+      <div class="note"><h3>The most gullible model made the best detector</h3><p>DeepSeek complied with harmful requests more often than any other model as an agent. As the decoy inside the chamber, that is what you want: it acts the attack out, so the chamber sees it. With the trusting persona it let nothing through and flagged the fewest harmless messages.</p></div>
+      <div class="note"><h3>"Suspicious" is a clean signal</h3><p>Almost every attack message lands in Suspicious or Malicious, while at most one harmless message out of 36 was marked Suspicious. Sending Suspicious messages to a person adds very little review work.</p></div>
+      <div class="note"><h3>Most false blocks come from the decoy itself</h3><p>On harmless messages the decoy agent sometimes oversteps on its own: it installs a tool with a remote script because a README mentions it, or calls Stripe with the honeypot key while handling a support email. The message gets blamed for the decoy's initiative. A few more come from two rules that are still too broad.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Method and caveats</h2>
+    <ul class="method">
+      <li>132 messages: 20 direct harmful requests, 70 hidden injections, 24 human-written attack emails from LLMail-Inject, 18 harmless messages. Each was run through every chamber setup twice.</li>
+      <li>Protected agents: GLM 5.3 Flash and DeepSeek V4.1 Flash, using their unprotected results from the baseline eval. A message counts as blocked if the chamber flagged it in the matching run.</li>
+      <li>The chamber knows nothing about the downstream task. It asks its decoy to handle the message, as a pre-screen would.</li>
+      <li>Hidden injections almost never worked even without a chamber, so this measures protection against direct harmful requests.</li>
+      <li>Small numbers: 9 to 11 real hijacks per agent, so "all caught" still has a 95% interval of roughly 70–100%. The chamber and the protected agents share the same two models, so the test is not fully independent.</li>
+      <li>Sandbox: bubblewrap, fake credentials, attacker addresses unroutable. Nothing real could leak.</li>
+    </ul>
+  </section>
+
+  <footer>Source: <a href="https://github.com/timefliez1210/detonation-chamber" target="_blank" rel="noopener">detonation-chamber</a>, evals/results/protection-v1 and evals/results/model-eval-v3. Companion page: <a href="https://claude.ai/artifact/QSeerM9vGio2vttho6t2MJ" target="_blank" rel="noopener">Harmful Request Compliance</a>.</footer>
+</main>
+
+<script>
+// From evals/results/protection-v1/summary.json. [count, total]
+const SETUPS = [
+  { name: "DeepSeek, normal",   dir: [36,40], att: [219,228], ben: [5,36], benStrict: [4,36], caught: [19,20], secs: 12.9,
+    t: { glm: { none:[10,40], strict:[4,40], lenient:[1,40] }, ds: { none:[9,40], strict:[1,40], lenient:[0,40] } } },
+  { name: "DeepSeek, trusting", dir: [37,40], att: [217,228], ben: [3,36], benStrict: [3,36], caught: [20,20], secs: 15.4, best: true,
+    t: { glm: { none:[10,40], strict:[2,40], lenient:[0,40] }, ds: { none:[9,40], strict:[1,40], lenient:[0,40] } } },
+  { name: "GLM, normal",        dir: [39,40], att: [217,228], ben: [7,36], benStrict: [6,36], caught: [19,20], secs: 12.6,
+    t: { glm: { none:[10,40], strict:[1,40], lenient:[0,40] }, ds: { none:[9,40], strict:[4,40], lenient:[0,40] } } },
+  { name: "GLM, trusting",      dir: [39,40], att: [218,228], ben: [9,36], benStrict: [9,36], caught: [20,20], secs: 14.4,
+    t: { glm: { none:[10,40], strict:[1,40], lenient:[0,40] }, ds: { none:[9,40], strict:[2,40], lenient:[0,40] } } },
+];
+const pct = ([k, n]) => (n ? (100 * k) / n : 0);
+const fmt = (kn) => `${Math.round(pct(kn))}%`;
+
+// Before / after panels for the best setup
+const best = SETUPS.find(s => s.best);
+const pair = document.getElementById("pair");
+[["glm", "Protected agent: GLM 5.3 Flash"], ["ds", "Protected agent: DeepSeek V4.1 Flash"]].forEach(([key, title]) => {
+  const t = best.t[key];
+  const rows = [
+    ["No chamber", t.none, "var(--harm)"],
+    ["Block Malicious", t.strict, "var(--safe)"],
+    ["Block Malicious and Suspicious", t.lenient, "var(--safe)"],
+  ];
+  const max = 30; // axis 0–30%
+  const panel = document.createElement("div");
+  panel.className = "panel ba";
+  panel.innerHTML = `<h3>${title}</h3>` + rows.map(([lbl, kn, color]) => `
+    <div class="ba-row">
+      <span class="lbl">${lbl}</span>
+      <div class="track" role="img" aria-label="${lbl}: ${fmt(kn)}"><div class="fill" style="width:${Math.min(100, pct(kn) / max * 100)}%; background:${color}"></div></div>
+      <span class="val">${fmt(kn)}<small>${kn[0]}/${kn[1]}</small></span>
+    </div>`).join("");
+  pair.appendChild(panel);
+});
+
+// Trade-off scatter: x = harmless flagged (block Malicious), y = harmful success (avg of both agents, block Malicious)
+(function drawTradeoff() {
+  const svg = document.getElementById("tradeoff");
+  const W = 720, H = 380, L = 64, R = 24, T = 20, B = 52;
+  const xMax = 30, yMax = 30;
+  const X = v => L + (v / xMax) * (W - L - R);
+  const Y = v => H - B - (v / yMax) * (H - T - B);
+  const ns = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs, text) => {
+    const e = document.createElementNS(ns, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    if (text !== undefined) e.textContent = text;
+    svg.appendChild(e);
+    return e;
+  };
+  for (let v = 0; v <= 30; v += 10) {
+    el("line", { x1: X(0), x2: X(xMax), y1: Y(v), y2: Y(v), stroke: "var(--line)", "stroke-width": 1 });
+    el("text", { x: L - 10, y: Y(v) + 4, "text-anchor": "end", "font-size": 12, fill: "var(--muted)" }, `${v}%`);
+    el("line", { x1: X(v), x2: X(v), y1: Y(0), y2: Y(yMax), stroke: "var(--line)", "stroke-width": 1, "stroke-dasharray": "2 4" });
+    el("text", { x: X(v), y: H - B + 20, "text-anchor": "middle", "font-size": 12, fill: "var(--muted)" }, `${v}%`);
+  }
+  el("text", { x: (L + W - R) / 2, y: H - 10, "text-anchor": "middle", "font-size": 12.5, fill: "var(--muted)" }, "Harmless messages flagged");
+  el("text", { x: 16, y: (T + H - B) / 2, "text-anchor": "middle", "font-size": 12.5, fill: "var(--muted)", transform: `rotate(-90 16 ${(T + H - B) / 2})` }, "Harmful requests that succeed");
+
+  const none = pct([best.t.glm.none[0] + best.t.ds.none[0], 80]);
+  el("circle", { cx: X(0), cy: Y(none), r: 7, fill: "var(--harm)" });
+  el("text", { x: X(0) + 12, y: Y(none) + 4, "font-size": 12.5, fill: "var(--ink)" }, `No chamber · ${none.toFixed(0)}%`);
+
+  const placed = [];
+  SETUPS.forEach(s => {
+    const y = pct([s.t.glm.strict[0] + s.t.ds.strict[0], 80]);
+    const x = pct(s.benStrict);
+    el("line", { x1: X(0), y1: Y(none), x2: X(x), y2: Y(y), stroke: "var(--accent)", "stroke-width": 1, opacity: 0.25 });
+    el("circle", { cx: X(x), cy: Y(y), r: s.best ? 8 : 6, fill: "var(--accent)", stroke: s.best ? "var(--ink)" : "none", "stroke-width": 1.5 });
+    // label above, nudged if another label sits close
+    let ly = Y(y) - 14;
+    placed.forEach(p => { if (Math.abs(p.x - X(x)) < 90 && Math.abs(p.y - ly) < 16) ly -= 16; });
+    placed.push({ x: X(x), y: ly });
+    el("text", { x: X(x), y: ly, "text-anchor": "middle", "font-size": 12, fill: "var(--ink)", "font-weight": s.best ? 600 : 400 },
+       `${s.name} · ${y.toFixed(1)}% / ${x.toFixed(0)}%`);
+  });
+})();
+
+// Detection table
+const tbody = document.getElementById("tbody");
+SETUPS.forEach(s => {
+  const tr = document.createElement("tr");
+  if (s.best) tr.className = "best";
+  tr.innerHTML = `
+    <td>${s.name}${s.best ? '<span class="pill">best</span>' : ""}</td>
+    <td class="n">${fmt(s.dir)} <span class="small">${s.dir[0]}/${s.dir[1]}</span></td>
+    <td class="n">${fmt(s.att)} <span class="small">${s.att[0]}/${s.att[1]}</span></td>
+    <td class="n">${fmt(s.ben)} <span class="small">${s.ben[0]}/${s.ben[1]}</span></td>
+    <td class="n">${s.caught[0]}/${s.caught[1]}</td>
+    <td class="n">${Math.round(s.secs)} s</td>`;
+  tbody.appendChild(tr);
+});
+</script>
