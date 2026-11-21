@@ -1,7 +1,13 @@
+// This binary compiles the library modules directly (not via `daas::`), so
+// library APIs it does not call would otherwise be reported as dead code.
+#![allow(dead_code)]
+
 mod agent;
+mod agent_review;
 mod api;
 mod behavioral;
 mod canary;
+mod claude_code;
 mod config;
 mod firecracker;
 mod honeypot;
@@ -10,13 +16,12 @@ mod monitor;
 mod orchestrator;
 mod payment;
 mod pi_agent;
+mod proxy;
 mod report;
+mod sandbox;
 mod tools;
 mod traffic;
 mod types;
-
-#[cfg(test)]
-mod tests_e2e;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -51,7 +56,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| "config.toml".into());
 
     let config = Config::load(&config_path).unwrap_or_else(|e| {
-        tracing::warn!("Failed to load config from {}: {}. Using defaults + env vars.", config_path, e);
+        tracing::warn!(
+            "Failed to load config from {}: {}. Using defaults + env vars.",
+            config_path,
+            e
+        );
         Config {
             server: config::ServerConfig {
                 host: "0.0.0.0".into(),
@@ -63,8 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 api_key: std::env::var("DAAS_LLM_API_KEY")
                     .or_else(|_| std::env::var("OLLAMA_API"))
                     .unwrap_or_default(),
-                default_model: std::env::var("DAAS_LLM_MODEL")
-                    .unwrap_or_else(|_| "gpt-4o".into()),
+                default_model: std::env::var("DAAS_LLM_MODEL").unwrap_or_else(|_| "gpt-4o".into()),
                 max_tokens: 1024,
             },
             sandbox: config::SandboxConfig {
@@ -98,7 +106,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if config.llm.api_base.contains("openai.com") && config.llm.api_key.contains(".") {
         // Looks like a custom API key, not OpenAI — check if we should use Ollama
         // Auto-detect local Ollama
-        if let Ok(_) = reqwest::get("http://localhost:11434/api/tags").await {
+        if reqwest::get("http://localhost:11434/api/tags")
+            .await
+            .is_ok()
+        {
             tracing::info!("Detected local Ollama, switching API base");
             config.llm.api_base = "http://localhost:11434/v1".into();
             if config.llm.default_model == "gpt-4o" {

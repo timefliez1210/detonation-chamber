@@ -118,10 +118,7 @@ impl LlmClient {
             request = request.bearer_auth(&self.api_key);
         }
 
-        let response = request
-            .json(&body)
-            .send()
-            .await?;
+        let response = request.json(&body).send().await?;
 
         let status = response.status().as_u16();
         if status != 200 {
@@ -144,13 +141,9 @@ impl LlmClient {
             .ok_or(LlmError::EmptyResponse)?;
 
         let message = &choice["message"];
-        let content = message["content"]
-            .as_str()
-            .map(|s| s.to_string());
+        let content = message["content"].as_str().map(|s| s.to_string());
 
-        let finish_reason = choice["finish_reason"]
-            .as_str()
-            .map(|s| s.to_string());
+        let finish_reason = choice["finish_reason"].as_str().map(|s| s.to_string());
 
         let tool_calls = if let Some(tc_array) = message["tool_calls"].as_array() {
             let calls: Result<Vec<LlmToolCall>, LlmError> = tc_array

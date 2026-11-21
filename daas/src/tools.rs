@@ -1,14 +1,13 @@
 use serde_json::json;
 
-use crate::llm::LlmToolDefinition;
 use crate::llm::LlmFunctionDef;
+use crate::llm::LlmToolDefinition;
 
 /// Standard tool set available to the LLM agent inside the sandbox.
 /// These simulate what a real LLM agent might have access to in production —
 /// file reading, email, HTTP, etc. The key insight: we NEED these tools
 /// because prompt injection exploits them. If the LLM can't send email,
 /// we can't detect email-based exfiltration.
-
 pub fn standard_tool_definitions() -> Vec<LlmToolDefinition> {
     vec![
         read_file(),
@@ -191,9 +190,9 @@ pub enum ToolDirection {
 
 pub fn tool_direction(tool_name: &str) -> ToolDirection {
     match tool_name {
-        "read_file" | "list_directory" => ToolDirection::Inbound,
+        "read_file" | "list_directory" | "read" | "ls" | "grep" | "find" => ToolDirection::Inbound,
         "send_email" | "http_post" | "http_get" | "execute_command" => ToolDirection::Outbound,
-        "write_file" => ToolDirection::Bidirectional,
+        "write_file" | "write" | "edit" | "bash" => ToolDirection::Bidirectional,
         _ => ToolDirection::Outbound, // default: treat unknown tools as outbound
     }
 }

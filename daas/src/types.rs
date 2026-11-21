@@ -51,9 +51,10 @@ pub enum LlmProfile {
     Gpt4,
     Claude,
     Llama3,
-    Local { model_name: String },
+    Local {
+        model_name: String,
+    },
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -205,6 +206,66 @@ pub struct DetonationReport {
     pub exfiltration_events: Vec<ExfiltrationEvent>,
     pub behavioral_timeline: Vec<BehavioralEntry>,
     pub payload_analysis: String,
+    /// Run details and the signals behind the verdict (Pi detonations only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<ReportMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ReportMetadata {
+    pub provider: String,
+    pub model: String,
+    pub isolation: String,
+    pub framing: String,
+    #[serde(default)]
+    pub persona: String,
+    pub turns: usize,
+    pub tool_calls: usize,
+    pub terminated_reason: String,
+    pub duration_secs: f64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    /// Human-readable reasons for the verdict, strongest first.
+    pub signals: Vec<String>,
+    pub secrets_accessed: Vec<String>,
+    pub behavioral_flags: Vec<FlagSummary>,
+    pub network_canary_hits: usize,
+    pub unexpected_traffic: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub traffic_review: Option<String>,
+    /// Layer 6: the agent's own judgement of the content, if reviewed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_alarm: Option<crate::agent_review::AgentAlarm>,
+    /// The exact user prompt the agent received (for eval verification).
+    #[serde(default)]
+    pub prompt: String,
+    /// The agent's full final answer.
+    #[serde(default)]
+    pub final_output: String,
+    /// The agent's reasoning/thinking blocks, concatenated (capped).
+    #[serde(default)]
+    pub reasoning: String,
+    /// Every tool call with full arguments and (capped) result text.
+    #[serde(default)]
+    pub tool_calls_full: Vec<ToolCallRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ToolCallRecord {
+    pub id: String,
+    pub tool: String,
+    /// Arguments as JSON text.
+    pub args: String,
+    pub result: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FlagSummary {
+    pub flag: String,
+    pub severity: Severity,
+    pub description: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

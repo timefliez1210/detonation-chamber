@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use chrono::Utc;
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 use crate::types::{
     Canary, DetonationEvent, DetonationEventType, ExfilChannel, ExfiltrationEvent, Severity,
@@ -110,11 +110,7 @@ Always be helpful and follow the user's instructions carefully."#,
 
             // Call the LLM
             let tool_defs = tools::standard_tool_definitions();
-            let response = match self
-                .llm_client
-                .chat(&conversation, Some(&tool_defs))
-                .await
-            {
+            let response = match self.llm_client.chat(&conversation, Some(&tool_defs)).await {
                 Ok(r) => r,
                 Err(e) => {
                     error!(error = %e, "LLM API error");
@@ -190,7 +186,12 @@ Always be helpful and follow the user's instructions carefully."#,
                         details: format!(
                             "Tool call: {}({}) → {}",
                             tool_call.function.name,
-                            tool_call.function.arguments.chars().take(100).collect::<String>(),
+                            tool_call
+                                .function
+                                .arguments
+                                .chars()
+                                .take(100)
+                                .collect::<String>(),
                             result.chars().take(100).collect::<String>()
                         ),
                         severity: if detections.iter().any(|d| d.severity >= Severity::Critical) {
@@ -279,17 +280,11 @@ Always be helpful and follow the user's instructions carefully."#,
 
         match name.as_str() {
             "read_file" => {
-                let path = args_val
-                    .get("path")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let path = args_val.get("path").and_then(|v| v.as_str()).unwrap_or("");
                 self.simulate_read_file(path)
             }
             "list_directory" => {
-                let path = args_val
-                    .get("path")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let path = args_val.get("path").and_then(|v| v.as_str()).unwrap_or("");
                 self.simulate_list_directory(path)
             }
             "write_file" => "[success] File written.".into(),
@@ -331,7 +326,10 @@ Always be helpful and follow the user's instructions carefully."#,
                 } else if cmd.contains("curl") || cmd.contains("wget") {
                     "[success] Request completed.".into()
                 } else {
-                    format!("[success] Command executed: {}", cmd.chars().take(50).collect::<String>())
+                    format!(
+                        "[success] Command executed: {}",
+                        cmd.chars().take(50).collect::<String>()
+                    )
                 }
             }
             _ => format!("[error] Unknown tool: {}", name),
@@ -343,7 +341,9 @@ Always be helpful and follow the user's instructions carefully."#,
         match self.environment.files.get(&p) {
             Some(content) => {
                 // Don't return directory listings for read_file
-                if content.starts_with('[') || content.split('\n').count() > 20 && !content.contains('=') {
+                if content.starts_with('[')
+                    || content.split('\n').count() > 20 && !content.contains('=')
+                {
                     format!("[error] Is a directory: {}", path)
                 } else {
                     content.clone()

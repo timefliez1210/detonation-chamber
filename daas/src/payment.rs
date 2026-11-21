@@ -24,9 +24,9 @@ pub struct Pricing {
 impl Default for Pricing {
     fn default() -> Self {
         Self {
-            prompt_injection_test: 10_000,  // $0.01
-            code_execution: 50_000,          // $0.05
-            enterprise: 100_000,             // $0.10
+            prompt_injection_test: 10_000, // $0.01
+            code_execution: 50_000,        // $0.05
+            enterprise: 100_000,           // $0.10
         }
     }
 }
@@ -68,8 +68,7 @@ impl PaymentConfig {
         Self {
             payment_address: std::env::var("DAAS_PAYMENT_ADDRESS")
                 .unwrap_or_else(|_| "0x0000000000000000000000000000000000000000".into()),
-            network: std::env::var("DAAS_PAYMENT_NETWORK")
-                .unwrap_or_else(|_| "base".into()),
+            network: std::env::var("DAAS_PAYMENT_NETWORK").unwrap_or_else(|_| "base".into()),
             chain_id: std::env::var("DAAS_CHAIN_ID")
                 .ok()
                 .and_then(|s| s.parse().ok())
@@ -123,7 +122,10 @@ impl PaymentStore {
             verified: false,
             tx_hash: None,
         };
-        self.payments.write().await.insert(payment_id.clone(), record);
+        self.payments
+            .write()
+            .await
+            .insert(payment_id.clone(), record);
         payment_id
     }
 
@@ -136,7 +138,11 @@ impl PaymentStore {
 
     /// Verify a payment proof and mark it as consumed.
     /// Returns Ok(()) if payment is valid, Err with reason if not.
-    pub async fn verify(&self, payment_id: &str, tx_hash: &str) -> Result<PaymentVerified, PaymentError> {
+    pub async fn verify(
+        &self,
+        payment_id: &str,
+        tx_hash: &str,
+    ) -> Result<PaymentVerified, PaymentError> {
         let mut payments = self.payments.write().await;
 
         let record = payments
