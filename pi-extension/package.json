@@ -1,14 +1,12 @@
 {
-  "name": "@timefliez1210/detonation-tool",
-  "version": "0.1.0",
-  "description": "Pi extension for detonation-tool: prompt injection detection via honeypot sandbox",
+  "name": "@timefliez1210/detonate-pi-extension",
+  "version": "0.2.0",
+  "description": "Pi extension for detonation-chamber: check untrusted content for prompt injection in a sandbox",
   "main": "index.ts",
   "license": "Apache-2.0",
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": ">=1.0.0"
-  },
-  "dependencies": {
-    "@sinclair/typebox": "^0.32.0"
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
   },
   "keywords": ["pi", "extension", "security", "prompt-injection"],
   "repository": {
