@@ -28,3 +28,10 @@ Thumbs.db
 /tmp/
 autoresearch.jsonl
 
+
+# Secrets
+.env
+.env.*
+!.env.example
+evals/results/
+evals/external/llmail/labelled_phase2.json

@@ -9,6 +9,9 @@ repository = "https://github.com/timefliez1210/detonation-chamber"
 keywords = ["security", "prompt-injection", "sandbox", "honeypot", "llm"]
 categories = ["command-line-utilities", "development-tools"]
 
+[workspace]
+members = [".", "daas"]
+
 [[bin]]
 name = "detonate"
 path = "src/main.rs"
@@ -28,6 +31,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono = { version = "0.4", features = ["serde"] }
 which = "8.0.2"
+dotenvy = "0.15.7"
 
 [dev-dependencies]
 tempfile = "3"

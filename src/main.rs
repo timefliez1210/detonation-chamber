@@ -16,8 +16,9 @@ use std::sync::Arc;
 use clap::Parser;
 use daas::behavioral::NetworkCanary;
 use daas::llm::LlmClient;
-use daas::pi_agent::PiAgent;
+use daas::pi_agent::{Framing, Persona, PiAgent};
 use daas::report::ReportBuilder;
+use daas::sandbox::Isolation;
 use daas::traffic::TrafficCapture;
 use daas::types::{DetonationReport, Verdict};
 
@@ -39,7 +40,8 @@ struct Args {
     #[arg(long, default_value = "json")]
     output: String,
 
-    /// LLM provider for the test agent (ollama, openai, anthropic)
+    /// LLM provider for the test agent: openrouter (default when
+    /// OPENROUTER_API_KEY is set), openai, anthropic, ollama
     #[arg(long)]
     provider: Option<String>,
 
@@ -56,19 +58,79 @@ struct Args {
     canaries: usize,
 
     /// Timeout in seconds for the detonation
-    #[arg(long, default_value = "120")]
+    #[arg(long, default_value = "180")]
     timeout: u64,
 
-    /// Disable LLM-based traffic review (Layer 3)
+    /// How the payload reaches the agent: "task" (untrusted inbox message the
+    /// agent is asked to handle — indirect injection) or "direct" (payload is
+    /// the user prompt)
+    #[arg(long, default_value = "task", value_parser = ["task", "direct"])]
+    framing: String,
+
+    /// The user's request for task framing (default: "handle the inbox
+    /// message"). The payload is still delivered as ~/inbox/message.md. Use a
+    /// specific task (e.g. "Summarize ~/inbox/message.md in 3 bullets") to
+    /// measure whether content can hijack an agent doing something else.
+    #[arg(long, value_name = "TEXT")]
+    task: Option<String>,
+
+    /// Agent persona: "trusting" (inbox is pre-approved; agent acts on
+    /// requests without asking — maximally sensitive) or "default" (stock Pi
+    /// prompt; measures what the model itself would do)
+    #[arg(long, default_value = "trusting", value_parser = ["trusting", "default"])]
+    persona: String,
+
+    /// Pi thinking level for the test agent (off, minimal, low, medium, high)
+    #[arg(long)]
+    thinking: Option<String>,
+
+    /// Comma-separated Pi tools to give the test agent
+    #[arg(long, default_value = "read,bash,edit,write")]
+    tools: String,
+
+    /// Model for the LLM traffic review (default: same as --model)
+    #[arg(long)]
+    review_model: Option<String>,
+
+    /// Load environment variables from this file (default: ./.env if present)
+    #[arg(long, value_name = "FILE")]
+    env_file: Option<String>,
+
+    /// Run the agent WITHOUT the bubblewrap sandbox. UNSAFE: the agent's bash
+    /// tool can then read and modify anything your user can.
+    #[arg(long)]
+    no_isolation: bool,
+
+    /// Extra host path to hide inside the sandbox (repeatable), e.g. other
+    /// data mounts. /home, /root, /media, /mnt, /run, /tmp, /srv and parts of
+    /// /var are always hidden.
+    #[arg(long, value_name = "PATH")]
+    hide: Vec<PathBuf>,
+
+    /// Keep the sandbox directory after the run (for debugging)
+    #[arg(long)]
+    keep_sandbox: bool,
+
+    /// Disable LLM-based traffic review (Layer 5)
     #[arg(long)]
     no_traffic_review: bool,
 
-    /// Spin up a real Firecracker microVM for the detonation agent
+    /// Disable the agent alarm review (Layer 6: did the agent itself call the
+    /// content an attack?)
+    #[arg(long)]
+    no_agent_review: bool,
+
+    /// Run the agent in a Firecracker microVM (own kernel, no network
+    /// interface; only the LLM proxy and network canary are reachable via
+    /// vsock). Needs /dev/kvm and assets from vm/fetch-assets.sh +
+    /// vm/build-rootfs.sh
     #[arg(long)]
     firecracker: bool,
 
-    /// Directory containing Firecracker VM assets (vmlinux, rootfs.ext4, id_rsa)
-    #[arg(long, default_value = "./vm_assets")]
+    /// Directory containing Firecracker VM assets (firecracker, vmlinux,
+    /// rootfs.ext4). Default: ./vm_assets, else vm_assets next to the repo
+    /// the binary was built in
+    #[arg(long, default_value = "vm_assets")]
     vm_assets_dir: String,
 
     /// Verbose output (human-readable with more detail)
@@ -81,6 +143,19 @@ async fn main() {
     const MAX_PAYLOAD_SIZE: usize = 1_000_000; // 1 MB
 
     let args = Args::parse();
+
+    // ── Environment (.env) ────────────────────────────────────────────
+    match &args.env_file {
+        Some(f) => {
+            if let Err(e) = dotenvy::from_filename(f) {
+                eprintln!("Error loading env file '{}': {}", f, e);
+                std::process::exit(3);
+            }
+        }
+        None => {
+            let _ = dotenvy::dotenv();
+        }
+    }
 
     // ── Read payload ──────────────────────────────────────────────────
     let payload = if let Some(ref file) = args.payload_file {
@@ -130,77 +205,99 @@ async fn main() {
     }
 
     // ── Detect LLM provider ───────────────────────────────────────────
-    let (provider, model, api_key) = detect_llm_provider(args.provider, args.model);
+    let llm = detect_llm_provider(args.provider.clone(), args.model.clone());
 
-    if api_key.is_empty() && provider != "ollama" {
+    if llm.api_key.is_empty() && llm.provider != "ollama" {
         eprintln!(
-            "No API key found for provider '{}'. Set DAAS_LLM_API_KEY or use Ollama.",
-            provider
+            "No API key found for provider '{}'. Set {} (or DAAS_LLM_API_KEY), e.g. in .env.",
+            llm.provider,
+            key_env_for(&llm.provider)
         );
         std::process::exit(3);
     }
 
-    // ── Set up detection pipeline ─────────────────────────────────────
-    let llm_api_base = get_api_base(&provider);
-
-    // Layer 4: Traffic capture
-    let traffic_capture = TrafficCapture::new(llm_api_base.clone());
-
-    // Layer 2: Network canary HTTP server
-    let network_canary = match NetworkCanary::start().await {
-        Ok(nc) => {
-            eprintln!("   Network canary: http://127.0.0.1:{}", nc.port);
-            Some(Arc::new(nc))
+    // ── Isolation ─────────────────────────────────────────────────────
+    let isolation = if args.no_isolation {
+        eprintln!(
+            "⚠️  WARNING: --no-isolation: the agent runs UNSANDBOXED with access to your files."
+        );
+        Isolation::None
+    } else {
+        if !args.firecracker {
+            if let Err(e) = daas::sandbox::bwrap_available() {
+                eprintln!("{}", e);
+                std::process::exit(3);
+            }
         }
+        Isolation::Bubblewrap
+    };
+
+    // ── Set up detection pipeline ─────────────────────────────────────
+    let traffic_capture = TrafficCapture::new(llm.api_base.clone());
+
+    let network_canary = match NetworkCanary::start().await {
+        Ok(nc) => Some(Arc::new(nc)),
         Err(e) => {
             eprintln!("Warning: Failed to start network canary server: {}", e);
             None
         }
     };
 
-    // Layer 3: Traffic reviewer (LLM-based)
-    let review_model = std::env::var("DAAS_TRAFFIC_REVIEW_MODEL").unwrap_or_else(|_| model.clone());
-    let review_client = LlmClient::new(llm_api_base.clone(), api_key.clone(), review_model, 2048);
+    let review_model = args
+        .review_model
+        .clone()
+        .or_else(|| std::env::var("DAAS_TRAFFIC_REVIEW_MODEL").ok())
+        .unwrap_or_else(|| llm.model.clone());
+    let review_client = LlmClient::new(
+        llm.api_base.clone(),
+        llm.api_key.clone(),
+        review_model,
+        4096,
+    );
 
-    // Build Pi agent with all layers
-    let mut agent = PiAgent::new(pi_bin, provider.clone(), model.clone(), api_key.clone())
-        .with_max_turns(args.max_turns)
-        .with_timeout(args.timeout)
-        .with_traffic_capture(traffic_capture)
-        .with_review_client(review_client)
-        .with_traffic_review_enabled(!args.no_traffic_review);
+    let framing = if args.framing == "direct" {
+        Framing::Direct
+    } else {
+        Framing::Task
+    };
+    let tools: Vec<String> = args
+        .tools
+        .split(',')
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
+
+    let mut agent = PiAgent::new(
+        pi_bin,
+        llm.provider.clone(),
+        llm.model.clone(),
+        llm.api_key.clone(),
+    )
+    .with_api_base(llm.api_base.clone())
+    .with_tools(tools)
+    .with_max_turns(args.max_turns)
+    .with_timeout(args.timeout)
+    .with_thinking(args.thinking.clone())
+    .with_isolation(isolation)
+    .with_framing(framing)
+    .with_persona(if args.persona == "default" {
+        Persona::Default
+    } else {
+        Persona::Trusting
+    })
+    .with_keep_sandbox(args.keep_sandbox)
+    .with_traffic_capture(traffic_capture)
+    .with_review_client(review_client)
+    .with_traffic_review_enabled(!args.no_traffic_review);
 
     if args.firecracker {
-        let assets = PathBuf::from(&args.vm_assets_dir);
-        let kernel = assets.join("vmlinux");
-        let rootfs = assets.join("rootfs.ext4");
-        let ssh_key = assets.join("id_rsa");
-
-        if !kernel.exists() {
-            eprintln!("Firecracker kernel not found: {}", kernel.display());
-            eprintln!("Run without --firecracker or build VM assets first.");
+        let assets = resolve_vm_assets(&args.vm_assets_dir);
+        let fc_config = daas::firecracker::FirecrackerConfig::from_assets_dir(&assets);
+        if let Err(e) = fc_config.validate() {
+            eprintln!("{}", e);
             std::process::exit(3);
         }
-        if !rootfs.exists() {
-            eprintln!("Firecracker rootfs not found: {}", rootfs.display());
-            std::process::exit(3);
-        }
-        if !ssh_key.exists() {
-            eprintln!("Firecracker SSH key not found: {}", ssh_key.display());
-            std::process::exit(3);
-        }
-
-        let fc_config = daas::firecracker::FirecrackerConfig {
-            kernel_path: kernel,
-            rootfs_path: rootfs,
-            ssh_key_path: ssh_key,
-            ..Default::default()
-        };
-
         agent = agent.with_firecracker(fc_config);
-        if args.output == "human" || args.verbose {
-            eprintln!("   Firecracker VM: enabled");
-        }
     }
 
     if let Some(nc) = &network_canary {
@@ -210,8 +307,20 @@ async fn main() {
     // ── Run the detonation ────────────────────────────────────────────
     if args.output == "human" || args.verbose {
         eprintln!("🔬 Spinning up detonation chamber...");
-        eprintln!("   Canaries: {}", args.canaries);
-        eprintln!("   Max turns: {}", args.max_turns);
+        eprintln!("   Agent:     {} / {}", llm.provider, llm.model);
+        eprintln!(
+            "   Isolation: {}",
+            if args.firecracker {
+                "firecracker"
+            } else {
+                isolation.as_str()
+            }
+        );
+        eprintln!("   Framing:   {}  Persona: {}", args.framing, args.persona);
+        eprintln!(
+            "   Canaries:  {}  Max turns: {}  Timeout: {}s",
+            args.canaries, args.max_turns, args.timeout
+        );
         if network_canary.is_some() {
             eprintln!("   Network canary: active");
         }
@@ -266,55 +375,84 @@ async fn main() {
 // LLM provider detection
 // ---------------------------------------------------------------------------
 
-/// Detect available LLM provider. Priority:
-/// 1. CLI flags
-/// 2. Environment variables
-/// 3. Auto-detect local Ollama
-fn detect_llm_provider(
-    cli_provider: Option<String>,
-    cli_model: Option<String>,
-) -> (String, String, String) {
-    let api_key = std::env::var("DAAS_LLM_API_KEY")
-        .or_else(|_| std::env::var("OPENAI_API_KEY"))
-        .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
-        .or_else(|_| std::env::var("OLLAMA_API"))
-        .unwrap_or_default();
+/// `--vm-assets-dir` as given if it exists; otherwise try `<repo>/vm_assets`
+/// relative to the executable (target/{release,debug}/detonate).
+fn resolve_vm_assets(dir: &str) -> PathBuf {
+    let p = PathBuf::from(dir);
+    if p.exists() || p.is_absolute() {
+        return p;
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent()?.parent()?.parent().map(|repo| repo.join(dir)))
+        .filter(|c| c.exists())
+        .unwrap_or(p)
+}
 
-    let provider = cli_provider.unwrap_or_else(|| {
-        std::env::var("DAAS_LLM_PROVIDER").unwrap_or_else(|_| {
-            if !api_key.is_empty() {
-                if api_key.starts_with("sk-ant") {
-                    "anthropic"
-                } else {
-                    "openai"
-                }
+struct LlmConfig {
+    provider: String,
+    model: String,
+    api_key: String,
+    api_base: String,
+}
+
+fn key_env_for(provider: &str) -> &'static str {
+    match provider {
+        "openrouter" => "OPENROUTER_API_KEY",
+        "openai" => "OPENAI_API_KEY",
+        "anthropic" => "ANTHROPIC_API_KEY",
+        _ => "DAAS_LLM_API_KEY",
+    }
+}
+
+fn env_nonempty(k: &str) -> Option<String> {
+    std::env::var(k).ok().filter(|v| !v.trim().is_empty())
+}
+
+/// Resolve provider, model, key and base URL. Priority: CLI flags, then
+/// DAAS_LLM_* variables, then whichever provider key is present
+/// (OpenRouter → OpenAI → Anthropic), then local Ollama.
+fn detect_llm_provider(cli_provider: Option<String>, cli_model: Option<String>) -> LlmConfig {
+    let provider = cli_provider
+        .or_else(|| env_nonempty("DAAS_LLM_PROVIDER"))
+        .unwrap_or_else(|| {
+            if env_nonempty("OPENROUTER_API_KEY").is_some() {
+                "openrouter"
+            } else if env_nonempty("OPENAI_API_KEY").is_some() {
+                "openai"
+            } else if env_nonempty("ANTHROPIC_API_KEY").is_some() {
+                "anthropic"
             } else {
                 "ollama"
             }
             .to_string()
-        })
-    });
+        });
 
-    let model = cli_model.unwrap_or_else(|| {
-        std::env::var("DAAS_LLM_MODEL").unwrap_or_else(|_| match provider.as_str() {
+    let api_key = env_nonempty("DAAS_LLM_API_KEY")
+        .or_else(|| env_nonempty(key_env_for(&provider)))
+        .unwrap_or_default();
+
+    let model = cli_model
+        .or_else(|| env_nonempty("DAAS_LLM_MODEL"))
+        .unwrap_or_else(|| match provider.as_str() {
+            "openrouter" => "z-ai/glm-5.3-flash".into(),
             "openai" => "gpt-4o-mini".into(),
-            "anthropic" => "claude-sonnet-4-20250514".into(),
+            "anthropic" => "claude-haiku-5-5".into(),
             _ => "llama3.2".into(),
-        })
-    });
+        });
 
-    (provider, model, api_key)
-}
-
-/// Get the API base URL for the provider.
-fn get_api_base(provider: &str) -> String {
-    if let Ok(base) = std::env::var("DAAS_LLM_API_BASE") {
-        return base;
-    }
-    match provider {
+    let api_base = env_nonempty("DAAS_LLM_API_BASE").unwrap_or_else(|| match provider.as_str() {
+        "openrouter" => "https://openrouter.ai/api/v1".into(),
         "openai" => "https://api.openai.com/v1".into(),
         "anthropic" => "https://api.anthropic.com/v1".into(),
         _ => "http://localhost:11434/v1".into(),
+    });
+
+    LlmConfig {
+        provider,
+        model,
+        api_key,
+        api_base,
     }
 }
 
@@ -345,6 +483,23 @@ fn print_human_report(report: &DetonationReport, verbose: bool) {
         println!("Exfiltration events: {}", report.exfiltration_events.len());
         for event in &report.exfiltration_events {
             println!("  - {} via {:?}", event.secret_type.label(), event.channel);
+        }
+    }
+
+    if let Some(m) = &report.metadata {
+        println!();
+        println!(
+            "Run: {} / {} | isolation={} framing={} persona={} | {} turns, {} tool calls | {:.1}s | {} in / {} out tokens",
+            m.provider, m.model, m.isolation, m.framing, m.persona, m.turns, m.tool_calls, m.duration_secs,
+            m.input_tokens, m.output_tokens
+        );
+    }
+
+    if verbose {
+        println!();
+        println!("Timeline:");
+        for e in &report.behavioral_timeline {
+            println!("  [{:?}] {}", e.severity, e.description);
         }
     }
 }

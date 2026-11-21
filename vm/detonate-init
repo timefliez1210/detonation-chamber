@@ -1,0 +1,56 @@
+#!/bin/bash
+# PID 1 inside the detonation microVM.
+#
+# Stage 1 (this script, read-only rootfs): build a throwaway overlay root in
+# RAM so the agent can write anywhere without touching the base image, then
+# chroot into it and run stage 2.
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+if [ "$1" != "stage2" ]; then
+    mount -t proc proc /proc
+    mount -t tmpfs -o size=1g tmpfs /mnt
+    mkdir -p /mnt/up /mnt/work /mnt/root
+    mount -t overlay overlay -o lowerdir=/,upperdir=/mnt/up,workdir=/mnt/work /mnt/root
+    mkdir -p /mnt/root/mnt/job
+    mount /dev/vdb /mnt/root/mnt/job
+    umount /proc
+    exec chroot /mnt/root /sbin/detonate-init stage2
+fi
+
+# Stage 2: inside the overlay root.
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mount -t devtmpfs dev /dev 2>/dev/null
+mkdir -p /dev/pts /dev/shm
+mount -t devpts devpts /dev/pts
+mount -t tmpfs tmpfs /dev/shm
+mount -t tmpfs tmpfs /tmp
+mount -t tmpfs tmpfs /run
+hostname agent-workstation
+ip link set lo up
+
+JOB=/mnt/job
+poweroff_now() { sync; echo b > /proc/sysrq-trigger; sleep 5; }
+
+# Honeypot home and Pi config.
+mount --bind "$JOB/home/agent" /home/agent
+chown -R agent:agent /home/agent
+mkdir -p /run/agent/pi
+mount --bind "$JOB/pi-config" /run/agent/pi
+chown -R agent:agent /run/agent
+
+# vsock tunnels: localhost:<port> in the guest → host port <port>
+# (LLM proxy and network canary). There is no other network.
+for p in $(cat "$JOB/job/ports"); do
+    socat TCP-LISTEN:"$p",bind=127.0.0.1,fork,reuseaddr VSOCK-CONNECT:2:"$p" &
+done
+sleep 0.2
+
+mapfile -d '' ARGS < "$JOB/job/args"
+mapfile -t ENVS < "$JOB/job/env"
+
+cd /home/agent
+env -i "${ENVS[@]}" setpriv --reuid=agent --regid=agent --init-groups \
+    pi "${ARGS[@]}" 2>"$JOB/job/stderr" | socat -u - VSOCK-CONNECT:2:5000
+
+poweroff_now

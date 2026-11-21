@@ -1,36 +1,24 @@
 # syntax=docker/dockerfile:1
-FROM rust:1.80-slim-bookworm AS builder
-
+FROM rust:1-slim-bookworm AS builder
 WORKDIR /app
-
-# Install build deps
-RUN apt-get update && apt-get install -y \
-    pkg-config libssl-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy manifests first for layer caching
-COPY Cargo.toml Cargo.lock ./
+RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+COPY Cargo.toml ./
 COPY src/ src/
-COPY SKILL.md ./
-COPY pi-extension/ pi-extension/
+COPY daas/ daas/
+COPY tests/ tests/
+RUN cargo build --release --bin detonate && strip target/release/detonate
 
-# Build
-RUN cargo build --release && \
-    strip target/release/detonate
-
-# Runtime stage
-FROM debian:bookworm-slim
-
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    curl \
+FROM node:22-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        bubblewrap ca-certificates curl git python3 \
     && rm -rf /var/lib/apt/lists/*
-
-# Optional: install pi + ollama for built-in LLM support
-# RUN curl -fsSL https://pi.sh/install | sh
-
+# Pi coding agent (the detonation agent)
+RUN npm install -g @earendil-works/pi-coding-agent && npm cache clean --force
 COPY --from=builder /app/target/release/detonate /usr/local/bin/detonate
 COPY SKILL.md /opt/detonate/SKILL.md
 COPY pi-extension/ /opt/detonate/pi-extension/
-
+WORKDIR /work
+# bubblewrap needs unprivileged user namespaces inside the container, e.g.:
+#   docker run --rm --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
+#     --env-file .env -i detonate --output human < payload.txt
 ENTRYPOINT ["detonate"]

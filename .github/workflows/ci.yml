@@ -24,18 +24,13 @@ jobs:
       uses: Swatinem/rust-cache@v2
 
     - name: Check formatting
-      run: cargo fmt -- --check
+      run: cargo fmt --all -- --check
 
     - name: Run clippy
-      run: cargo clippy --all-targets --all-features -- -D warnings
+      run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-    - name: Run tests (detonation-tool)
-      run: cargo test --verbose
-
-    - name: Run tests (daas library)
-      run: |
-        cd ../detontation_chamber/daas
-        cargo test --verbose
+    - name: Run tests (CLI + daas library)
+      run: cargo test --workspace --verbose
 
     - name: Build release
       run: cargo build --release

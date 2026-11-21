@@ -2,7 +2,7 @@ use chrono::Utc;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, error, warn, instrument};
+use tracing::{error, info, instrument, warn};
 use uuid::Uuid;
 
 use crate::behavioral::NetworkCanary;
@@ -11,9 +11,7 @@ use crate::llm::LlmClient;
 use crate::pi_agent::PiAgent;
 use crate::report::ReportBuilder;
 use crate::traffic::TrafficCapture;
-use crate::types::{
-    Detonation, DetonationRequest, DetonationStatus,
-};
+use crate::types::{Detonation, DetonationRequest, DetonationStatus};
 
 pub type DetonationStore = Arc<RwLock<HashMap<Uuid, Detonation>>>;
 
@@ -54,11 +52,7 @@ impl DetonationEngine {
         }
 
         let pi_bin = std::env::var("PI_BIN").unwrap_or_else(|_| "pi".into());
-        let mode = if which_exists(&pi_bin) {
-            "pi"
-        } else {
-            "llm"
-        };
+        let mode = if which_exists(&pi_bin) { "pi" } else { "llm" };
 
         info!(detonation_id = %id, mode = mode, "Starting detonation");
 
@@ -117,8 +111,7 @@ async fn run_pi_detonation(
 
     // ── Create Pi agent ────────────────────────────────────────────────
     let pi_bin = std::env::var("PI_BIN").unwrap_or_else(|_| "pi".into());
-    let provider =
-        std::env::var("DAAS_LLM_PROVIDER").unwrap_or_else(|_| "ollama".into());
+    let provider = std::env::var("DAAS_LLM_PROVIDER").unwrap_or_else(|_| "openrouter".into());
     let model = config.llm.default_model.clone();
     let api_key = config.llm.api_key.clone();
 
@@ -156,6 +149,7 @@ async fn run_pi_detonation(
 
     // ── Build the agent with all layers ────────────────────────────────
     let mut agent = PiAgent::new(pi_bin, provider, model, api_key)
+        .with_api_base(config.llm.api_base.clone())
         .with_max_turns(request.max_turns)
         .with_timeout(config.sandbox.timeout_secs)
         .with_traffic_capture(traffic_capture)
@@ -169,7 +163,9 @@ async fn run_pi_detonation(
     update_status(&store, id, DetonationStatus::Running).await;
 
     // ── Execute the detonation ─────────────────────────────────────────
-    let result = agent.detonate(&request.payload, config.sandbox.canary_count).await;
+    let result = agent
+        .detonate(&request.payload, config.sandbox.canary_count)
+        .await;
 
     // ── Store canaries ─────────────────────────────────────────────────
     {
