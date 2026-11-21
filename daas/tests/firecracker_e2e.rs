@@ -1,31 +1,55 @@
+//! Boots a real Firecracker microVM and runs `pi --version` inside it.
+//! Needs /dev/kvm and assets: `vm/fetch-assets.sh && vm/build-rootfs.sh`.
+//! Run with: cargo test -p daas --test firecracker_e2e -- --ignored
+
+use daas::firecracker::{FirecrackerConfig, FirecrackerJob, FirecrackerVm};
 use std::path::PathBuf;
-use daas::firecracker::{FirecrackerConfig, FirecrackerVm};
+use std::time::Duration;
+use tokio::io::AsyncReadExt;
 
 #[tokio::test]
-async fn firecracker_vm_boots_and_ssh_works() {
-    let assets = PathBuf::from("/vm_assets");
-    let config = FirecrackerConfig {
-        kernel_path: assets.join("vmlinux"),
-        rootfs_path: assets.join("rootfs.ext4"),
-        ssh_key_path: assets.join("id_rsa"),
-        firecracker_bin: PathBuf::from("firecracker"),
-        tap_dev: "fc_tap0".into(),
-        tap_ip: "172.16.0.1/30".into(),
-        guest_ip: "172.16.0.2".into(),
-        guest_mac: "06:00:AC:10:00:02".into(),
-        memory_mb: 1024,
-        vcpus: 2,
+#[ignore = "requires /dev/kvm and VM assets in ../vm_assets"]
+async fn firecracker_vm_runs_pi_and_streams_output() {
+    let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vm_assets");
+    let cfg = FirecrackerConfig::from_assets_dir(&assets);
+    cfg.validate().expect("assets present");
+
+    let job_dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(job_dir.path().join("home/agent")).unwrap();
+    std::fs::create_dir_all(job_dir.path().join("pi-config")).unwrap();
+    let args = vec!["--version".to_string()];
+    let env = vec![
+        (
+            "PATH".to_string(),
+            "/usr/local/bin:/usr/bin:/bin".to_string(),
+        ),
+        ("HOME".to_string(), "/home/agent".to_string()),
+    ];
+    let job = FirecrackerJob {
+        job_dir: job_dir.path(),
+        pi_args: &args,
+        env: &env,
+        forward_ports: &[],
     };
 
-    let vm = FirecrackerVm::start(config).await.expect("VM should start");
-
-    // Wait for SSH with a longer timeout for first boot
-    vm.wait_for_ssh(60).await.expect("SSH should become available");
-
-    // Run a simple command
-    let output = vm.ssh_exec("echo hello-from-vm").await.expect("ssh command should run");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("hello-from-vm"), "Unexpected stdout: {}", stdout);
-
-    vm.kill().await.expect("VM should be killed cleanly");
+    let mut vm = FirecrackerVm::start(&cfg, job)
+        .await
+        .expect("VM should start");
+    let mut stream = vm
+        .output(Duration::from_secs(60))
+        .await
+        .expect("guest output");
+    let mut out = String::new();
+    stream.read_to_string(&mut out).await.unwrap();
+    assert!(
+        out.trim()
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit()),
+        "unexpected: {out:?}"
+    );
+    assert!(
+        vm.shutdown(Duration::from_secs(15)).await,
+        "VM should power off cleanly"
+    );
 }

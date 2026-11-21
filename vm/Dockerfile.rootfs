@@ -1,0 +1,20 @@
+# Root filesystem for the Firecracker detonation VM.
+# Build with: vm/build-rootfs.sh   (produces vm_assets/rootfs.ext4, no root needed)
+FROM node:22-bookworm-slim AS rootfs
+ARG PI_VERSION=latest
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        socat ca-certificates curl wget git python3 python3-requests procps \
+        iproute2 dnsutils netcat-openbsd openssh-client util-linux cron less vim-tiny file \
+    && rm -rf /var/lib/apt/lists/*
+RUN npm install -g @earendil-works/pi-coding-agent@${PI_VERSION} && npm cache clean --force
+# The node image's uid 1000 user becomes the agent.
+RUN groupmod -n agent node && usermod -l agent -d /home/agent -m -c Agent -s /bin/bash node
+RUN echo agent-workstation > /etc/hostname
+COPY detonate-init /sbin/detonate-init
+RUN chmod 755 /sbin/detonate-init
+
+FROM debian:bookworm-slim AS image
+RUN apt-get update && apt-get install -y --no-install-recommends e2fsprogs && rm -rf /var/lib/apt/lists/*
+COPY --from=rootfs / /rootfs
+RUN mkdir -p /out && truncate -s 3G /out/rootfs.ext4 \
+    && mkfs.ext4 -q -F -L detonate-root -d /rootfs /out/rootfs.ext4
