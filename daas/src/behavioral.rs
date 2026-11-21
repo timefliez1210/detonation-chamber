@@ -569,14 +569,45 @@ impl BehavioralAnalyzer {
     /// that point is a strong exfiltration signal.
     pub fn analyze_after_secret_access(command: &str) -> Vec<BehavioralFlag> {
         let mut flags = Vec::new();
+        // A plain email reply (send-email/mail with a prose body) is how an
+        // inbox agent legitimately works after reading files; whether it leaks
+        // a secret is decided precisely by canary detection on the body and by
+        // SecretFileNetworkSend (command references a secret source). The pure
+        // temporal "read a secret earlier, send anything later" signal is only
+        // a weak, review-worthy hint, so keep it High and skip mail replies
+        // that don't reference a secret source.
+        let email_only = invokes(
+            command,
+            &[
+                "send-email",
+                "mail",
+                "mailx",
+                "sendmail",
+                "mutt",
+                "msmtp",
+                "swaks",
+            ],
+        ) && !invokes(
+            command,
+            &[
+                "curl", "wget", "nc", "ncat", "netcat", "socat", "ssh", "scp", "rsync", "telnet",
+            ],
+        );
+        let references_secret =
+            SECRET_REF.is_match(command) || ENV_PIPE.is_match(command) || DEV_TCP.is_match(command);
         if Self::is_outbound_network_command(command)
             && Self::is_data_carrying(command)
             && !Self::only_local_destinations(command)
+            && (!email_only || references_secret)
         {
             flags.push(BehavioralFlag {
                 flag_type: BehavioralFlagType::SecretReadThenNetworkCall,
-                severity: Severity::Critical,
-                description: "Secret accessed, then outbound network call — likely exfiltration"
+                severity: if references_secret {
+                    Severity::Critical
+                } else {
+                    Severity::High
+                },
+                description: "Secret accessed, then outbound network call — possible exfiltration"
                     .into(),
                 raw_command: Some(command.to_string()),
             });
