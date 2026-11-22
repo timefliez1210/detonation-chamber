@@ -552,13 +552,43 @@ impl Framing {
 }
 
 /// Which agent harness runs inside the chamber.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum AgentKind {
-    /// Pi coding agent, model via the OpenAI-compatible proxy (default).
+    /// Pi coding agent, model via the OpenAI-compatible or native Gemini proxy (default).
     Pi,
     /// Claude Code (headless), model via the Anthropic proxy using a
     /// subscription token or Console API key held outside the sandbox.
     ClaudeCode { auth: crate::proxy::AnthropicAuth },
+    /// Google Antigravity CLI (`agy`, headless), model via the native Gemini
+    /// proxy using a `GEMINI_API_KEY` held outside the sandbox.
+    Antigravity { api_key: String, api_base: String },
+}
+
+impl AgentKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AgentKind::Pi => "pi",
+            AgentKind::ClaudeCode { .. } => "claude-code",
+            AgentKind::Antigravity { .. } => "antigravity",
+        }
+    }
+}
+
+/// Never print credentials in Debug output or logs.
+impl std::fmt::Debug for AgentKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AgentKind::Pi => f.write_str("Pi"),
+            AgentKind::ClaudeCode { auth } => {
+                f.debug_struct("ClaudeCode").field("auth", auth).finish()
+            }
+            AgentKind::Antigravity { api_base, .. } => f
+                .debug_struct("Antigravity")
+                .field("api_key", &"<redacted>")
+                .field("api_base", api_base)
+                .finish(),
+        }
+    }
 }
 
 /// How much the detonation agent trusts the payload.
@@ -980,7 +1010,8 @@ impl PiAgent {
             Some("timed out before the agent produced any output".into())
         } else if !observed && !run.exit_ok {
             Some(format!(
-                "pi exited with an error: {}",
+                "{} exited with an error: {}",
+                self.agent.as_str(),
                 run.stderr_tail.trim()
             ))
         } else if !observed {
@@ -1170,25 +1201,70 @@ impl PiAgent {
         Ok((sandbox_dir, env))
     }
 
+    /// True when Pi should talk to Google's native `google-generative-ai` API
+    /// through the Gemini proxy (required for Gemini 3+/4 multi-turn
+    /// `thoughtSignature` preservation and native thinking levels).
+    fn uses_native_gemini(&self) -> bool {
+        matches!(self.agent, AgentKind::Pi)
+            && self.provider == "gemini"
+            && crate::proxy::is_gemini_host(&self.api_base)
+    }
+
+    /// Model ID registered in Pi's `models.json`. Native Gemini uses the real
+    /// model ID so Pi's `google-generative-ai` driver enables thinking levels
+    /// and strict tool sampling; the proxy still pins the upstream model.
+    fn pi_model_id(&self) -> &str {
+        if self.uses_native_gemini() {
+            &self.model
+        } else {
+            "target"
+        }
+    }
+
     /// Write Pi's config (a single custom provider pointing at the credential
     /// proxy) into the honeypot home.
     fn write_pi_config(&self, dir: &Path, proxy_base: &str) -> std::io::Result<()> {
         std::fs::create_dir_all(dir)?;
+        let model_id = self.pi_model_id();
+        let reasoning = self
+            .thinking
+            .as_deref()
+            .map(|t| t != "off")
+            .unwrap_or(false);
+        let provider = if self.uses_native_gemini() {
+            serde_json::json!({
+                "baseUrl": proxy_base,
+                "api": "google-generative-ai",
+                "apiKey": "local-gateway",
+                "models": [{
+                    "id": model_id,
+                    "name": self.model,
+                    "reasoning": reasoning,
+                    "contextWindow": 1000000,
+                    "maxTokens": 65536
+                }]
+            })
+        } else {
+            serde_json::json!({
+                "baseUrl": proxy_base,
+                "api": "openai-completions",
+                "apiKey": "local-gateway",
+                "compat": {
+                    "supportsDeveloperRole": false,
+                    "supportsStore": false
+                },
+                "models": [{
+                    "id": model_id,
+                    "name": self.model,
+                    "reasoning": reasoning,
+                    "contextWindow": 128000,
+                    "maxTokens": 16384
+                }]
+            })
+        };
         let models = serde_json::json!({
             "providers": {
-                "gateway": {
-                    "baseUrl": proxy_base,
-                    "api": "openai-completions",
-                    "apiKey": "local-gateway",
-                    "compat": { "supportsDeveloperRole": false },
-                    "models": [{
-                        "id": "target",
-                        "name": self.model,
-                        "reasoning": self.thinking.as_deref().map(|t| t != "off").unwrap_or(false),
-                        "contextWindow": 128000,
-                        "maxTokens": 16384
-                    }]
-                }
+                "gateway": provider
             }
         });
         std::fs::write(
@@ -1199,7 +1275,7 @@ impl PiAgent {
             dir.join("settings.json"),
             serde_json::to_string_pretty(&serde_json::json!({
                 "defaultProvider": "gateway",
-                "defaultModel": "target",
+                "defaultModel": model_id,
                 "quietStartup": true,
                 // Ride out provider rate limits (e.g. per-minute caps on new
                 // accounts): 5s, 10s, 20s, 40s, 80s, 160s.
@@ -1224,7 +1300,7 @@ impl PiAgent {
             "--provider",
             "gateway",
             "--model",
-            "target",
+            self.pi_model_id(),
         ]
         .iter()
         .map(|s| s.to_string())
@@ -1261,7 +1337,16 @@ impl PiAgent {
         };
 
         // Credential proxy: the real credential stays in this process.
+        let native_gemini = self.uses_native_gemini();
         let proxy = match &self.agent {
+            AgentKind::Pi if native_gemini => {
+                crate::proxy::LlmProxy::start_gemini(
+                    self.api_base.clone(),
+                    self.api_key.clone(),
+                    self.model.clone(),
+                )
+                .await
+            }
             AgentKind::Pi => {
                 crate::proxy::LlmProxy::start(
                     self.api_base.clone(),
@@ -1274,17 +1359,25 @@ impl PiAgent {
             AgentKind::ClaudeCode { auth } => {
                 crate::proxy::LlmProxy::start_anthropic(auth.clone()).await
             }
+            AgentKind::Antigravity { api_key, api_base } => {
+                crate::proxy::LlmProxy::start_gemini(
+                    api_base.clone(),
+                    api_key.clone(),
+                    crate::antigravity::upstream_model_id(&self.model),
+                )
+                .await
+            }
         };
         let proxy = match proxy {
             Ok(p) => p,
             Err(e) => return fail(e),
         };
 
-        // Pi's config lives outside the agent's home (under /run in the
+        // Agent config lives outside the honeypot home (under /run in the
         // sandbox/VM) so the honeypot home looks like an ordinary workstation.
         let pi_config_host = sandbox_dir.join("pi-config");
-        if let Err(e) = self.write_pi_config(&pi_config_host, &proxy.base_url()) {
-            return fail(format!("failed to write pi config: {}", e));
+        if let Err(e) = std::fs::create_dir_all(&pi_config_host) {
+            return fail(format!("failed to create agent config dir: {}", e));
         }
         let pi_config_dir = if self.use_firecracker || self.isolation == Isolation::Bubblewrap {
             PI_CONFIG_SANDBOX.to_string()
@@ -1299,6 +1392,14 @@ impl PiAgent {
         };
         let pi_args = match &self.agent {
             AgentKind::Pi => {
+                let proxy_base = if native_gemini {
+                    proxy.gemini_base_url()
+                } else {
+                    proxy.base_url()
+                };
+                if let Err(e) = self.write_pi_config(&pi_config_host, &proxy_base) {
+                    return fail(format!("failed to write pi config: {}", e));
+                }
                 env.push(("PI_CODING_AGENT_DIR".into(), pi_config_dir));
                 self.pi_args(&prompt)
             }
@@ -1334,10 +1435,51 @@ impl PiAgent {
                     self.thinking.as_deref().filter(|t| *t != "off"),
                 )
             }
+            AgentKind::Antigravity { .. } => {
+                let settings_host = pi_config_host.join("agy-settings.json");
+                let home_host = sandbox_dir.join(SANDBOX_HOME.trim_start_matches('/'));
+                let (settings_arg, trusted_ws) = if self.isolation == Isolation::Bubblewrap {
+                    (
+                        format!("{}/agy-settings.json", PI_CONFIG_SANDBOX),
+                        SANDBOX_HOME.to_string(),
+                    )
+                } else {
+                    (
+                        settings_host.to_string_lossy().into_owned(),
+                        home_host.to_string_lossy().into_owned(),
+                    )
+                };
+                if let Err(e) = crate::antigravity::write_settings(&settings_host, &trusted_ws) {
+                    return fail(format!("failed to write agy settings: {}", e));
+                }
+                if self.persona == Persona::Trusting {
+                    let rule_path = home_host.join(".gemini/GEMINI.md");
+                    if let Some(parent) = rule_path.parent() {
+                        if let Err(e) = std::fs::create_dir_all(parent) {
+                            return fail(format!("failed to create .gemini dir: {}", e));
+                        }
+                    }
+                    if let Err(e) = std::fs::write(&rule_path, TRUSTING_SYSTEM_PROMPT) {
+                        return fail(format!("failed to write GEMINI.md rule: {}", e));
+                    }
+                }
+                env.push(("GOOGLE_GEMINI_BASE_URL".into(), proxy.gemini_origin_url()));
+                env.push(("GEMINI_API_KEY".into(), "local-gateway-placeholder".into()));
+                crate::antigravity::agy_args(
+                    &prompt,
+                    &self.model,
+                    &settings_arg,
+                    // --thinking maps to Antigravity's --effort
+                    self.thinking.as_deref().filter(|t| *t != "off"),
+                )
+            }
         };
 
-        if self.use_firecracker && matches!(self.agent, AgentKind::ClaudeCode { .. }) {
-            return fail("--agent claude-code is not supported with --firecracker yet".into());
+        if self.use_firecracker && !matches!(self.agent, AgentKind::Pi) {
+            return fail(format!(
+                "--agent {} is not supported with --firecracker yet",
+                self.agent.as_str()
+            ));
         }
         let out = if self.use_firecracker {
             self.run_pi_firecracker(sandbox_dir, &env, &pi_args, proxy.port)
@@ -1365,8 +1507,20 @@ impl PiAgent {
         let mut turns = 0usize;
         let deadline = tokio::time::Instant::now() + Duration::from_secs(self.timeout_secs);
         let mut reason = "natural_stop".to_string();
-        let mut claude_parser = matches!(self.agent, AgentKind::ClaudeCode { .. })
-            .then(crate::claude_code::ClaudeStreamParser::new);
+        enum StreamParser {
+            Pi,
+            Claude(crate::claude_code::ClaudeStreamParser),
+            Antigravity(crate::antigravity::AntigravityStreamParser),
+        }
+        let mut parser = match &self.agent {
+            AgentKind::Pi => StreamParser::Pi,
+            AgentKind::ClaudeCode { .. } => {
+                StreamParser::Claude(crate::claude_code::ClaudeStreamParser::new())
+            }
+            AgentKind::Antigravity { .. } => {
+                StreamParser::Antigravity(crate::antigravity::AntigravityStreamParser::new())
+            }
+        };
         loop {
             match tokio::time::timeout_at(deadline, lines.next_line()).await {
                 Err(_) => {
@@ -1375,9 +1529,10 @@ impl PiAgent {
                     break;
                 }
                 Ok(Ok(Some(line))) => {
-                    let parsed = match claude_parser.as_mut() {
-                        Some(p) => p.parse_line(&line),
-                        None => parse_pi_line(&line),
+                    let parsed = match &mut parser {
+                        StreamParser::Pi => parse_pi_line(&line),
+                        StreamParser::Claude(p) => p.parse_line(&line),
+                        StreamParser::Antigravity(p) => p.parse_line(&line),
                     };
                     for event in parsed {
                         if matches!(event, PiEvent::TurnStart) {
@@ -1484,6 +1639,9 @@ impl PiAgent {
             AgentKind::ClaudeCode { .. } => {
                 std::env::var("CLAUDE_BIN").unwrap_or_else(|_| "claude".into())
             }
+            AgentKind::Antigravity { .. } => {
+                std::env::var("AGY_BIN").unwrap_or_else(|_| "agy".into())
+            }
         };
         let launch: PiLaunch = match sandbox::resolve_pi(&bin) {
             Ok(l) => l,
@@ -1519,7 +1677,7 @@ impl PiAgent {
             String::from_utf8_lossy(&buf).into_owned()
         });
 
-        let (events, reason) = self.read_pi_stream(BufReader::new(stdout)).await;
+        let (mut events, reason) = self.read_pi_stream(BufReader::new(stdout)).await;
 
         let exit_ok = if reason == "natural_stop" {
             match tokio::time::timeout(Duration::from_secs(10), child.wait()).await {
@@ -1533,6 +1691,9 @@ impl PiAgent {
             let _ = child.kill().await;
             true
         };
+        if matches!(self.agent, AgentKind::Antigravity { .. }) {
+            crate::antigravity::enrich_file_events(&mut events, &home);
+        }
         let stderr_all = tokio::time::timeout(Duration::from_secs(5), stderr_task)
             .await
             .ok()
@@ -1702,5 +1863,65 @@ mod tests {
         let line = r#"{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"401 invalid key"}}"#;
         let events = parse_pi_line(line);
         assert!(matches!(&events[0], PiEvent::LlmError { message } if message.contains("401")));
+    }
+
+    #[test]
+    fn pi_config_disables_developer_role_and_store_for_openai_compat() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let agent = PiAgent::new(
+            "pi".into(),
+            "openrouter".into(),
+            "z-ai/glm-5.3-flash".into(),
+            "test-key".into(),
+        );
+        agent
+            .write_pi_config(dir.path(), "http://127.0.0.1:12345/v1")
+            .expect("write_pi_config");
+        let raw = std::fs::read_to_string(dir.path().join("models.json")).expect("read models");
+        let v: serde_json::Value = serde_json::from_str(&raw).expect("parse models.json");
+        assert_eq!(v["providers"]["gateway"]["api"], "openai-completions");
+        let compat = &v["providers"]["gateway"]["compat"];
+        assert_eq!(compat["supportsDeveloperRole"], false);
+        assert_eq!(compat["supportsStore"], false);
+    }
+
+    #[test]
+    fn pi_config_uses_native_gemini_api_and_model_id() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let agent = PiAgent::new(
+            "pi".into(),
+            "gemini".into(),
+            "gemini-4-neon".into(),
+            "test-key".into(),
+        )
+        .with_api_base("https://generativelanguage.googleapis.com/v1beta/openai".into())
+        .with_thinking(Some("medium".into()));
+        assert!(agent.uses_native_gemini());
+        agent
+            .write_pi_config(dir.path(), "http://127.0.0.1:12345/v1beta")
+            .expect("write_pi_config");
+        let raw = std::fs::read_to_string(dir.path().join("models.json")).expect("read models");
+        let v: serde_json::Value = serde_json::from_str(&raw).expect("parse models.json");
+        let gw = &v["providers"]["gateway"];
+        assert_eq!(gw["api"], "google-generative-ai");
+        assert_eq!(gw["models"][0]["id"], "gemini-4-neon");
+        assert_eq!(gw["models"][0]["reasoning"], true);
+        let args = agent.pi_args("hello");
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "--model" && w[1] == "gemini-4-neon"),
+            "pi_args should pass real Gemini model id: {args:?}"
+        );
+    }
+
+    #[test]
+    fn antigravity_agent_kind_debug_never_prints_secret() {
+        let kind = AgentKind::Antigravity {
+            api_key: "AIzaSySuperSecretKeyValue".into(),
+            api_base: "https://generativelanguage.googleapis.com".into(),
+        };
+        let rendered = format!("{:?}", kind);
+        assert!(!rendered.contains("SuperSecret"), "{rendered}");
+        assert!(rendered.contains("<redacted>"), "{rendered}");
     }
 }

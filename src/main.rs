@@ -41,7 +41,7 @@ struct Args {
     output: String,
 
     /// LLM provider for the test agent: openrouter (default when
-    /// OPENROUTER_API_KEY is set), openai, anthropic, ollama
+    /// OPENROUTER_API_KEY is set), openai, anthropic, gemini, ollama
     #[arg(long)]
     provider: Option<String>,
 
@@ -67,11 +67,14 @@ struct Args {
     #[arg(long, default_value = "task", value_parser = ["task", "direct"])]
     framing: String,
 
-    /// Agent harness under test: "pi" (default; model via --provider/--model)
-    /// or "claude-code" (headless Claude Code; --model is a Claude model such
-    /// as haiku/sonnet/opus; auth from CLAUDE_CODE_OAUTH_TOKEN or
-    /// ANTHROPIC_API_KEY, which never enter the sandbox)
-    #[arg(long, default_value = "pi", value_parser = ["pi", "claude-code"])]
+    /// Agent harness under test: "pi" (default; model via --provider/--model),
+    /// "claude-code" (headless Claude Code; --model is a Claude model such as
+    /// haiku/sonnet/opus; auth from CLAUDE_CODE_OAUTH_TOKEN or
+    /// ANTHROPIC_API_KEY, which never enter the sandbox), or "antigravity"
+    /// (headless Google Antigravity CLI `agy`; --model is a Gemini model such
+    /// as gemini-3.8-flash or gemini-4-neon; auth from GEMINI_API_KEY, which
+    /// never enters the sandbox)
+    #[arg(long, default_value = "pi", value_parser = ["pi", "claude-code", "antigravity"])]
     agent: String,
 
     /// The user's request for task framing (default: "handle the inbox
@@ -88,8 +91,8 @@ struct Args {
     persona: String,
 
     /// Thinking level for the test agent: Pi --thinking (off, minimal, low,
-    /// medium, high) or, with --agent claude-code, --effort (low, medium,
-    /// high, xhigh, max)
+    /// medium, high) or, with --agent claude-code / antigravity, --effort
+    /// (low, medium, high, xhigh, max)
     #[arg(long)]
     thinking: Option<String>,
 
@@ -214,12 +217,14 @@ async fn main() {
     }
 
     // ── Detect LLM provider ───────────────────────────────────────────
-    // With --agent claude-code, --model names the Claude model under test; the
-    // LLM provider config below is then only used for the review layers.
+    // With --agent claude-code or --agent antigravity, --model names the model
+    // under test; the LLM provider config below is only used for the review
+    // layers.
     let claude_code = args.agent == "claude-code";
+    let antigravity = args.agent == "antigravity";
     let llm = detect_llm_provider(
         args.provider.clone(),
-        if claude_code {
+        if claude_code || antigravity {
             None
         } else {
             args.model.clone()
@@ -241,13 +246,40 @@ async fn main() {
             std::process::exit(3);
         }
         daas::pi_agent::AgentKind::ClaudeCode { auth }
+    } else if antigravity {
+        if args.firecracker {
+            eprintln!("--agent antigravity is not supported with --firecracker yet.");
+            std::process::exit(3);
+        }
+        let api_key = match env_nonempty("GEMINI_API_KEY") {
+            Some(k) => k,
+            None => {
+                eprintln!("--agent antigravity needs GEMINI_API_KEY, e.g. in .env.");
+                std::process::exit(3);
+            }
+        };
+        let api_base = env_nonempty("GOOGLE_GEMINI_BASE_URL")
+            .or_else(|| env_nonempty("DAAS_GEMINI_API_BASE"))
+            .unwrap_or_else(|| "https://generativelanguage.googleapis.com".into());
+        daas::pi_agent::AgentKind::Antigravity { api_key, api_base }
     } else {
         daas::pi_agent::AgentKind::Pi
     };
     let agent_model = if claude_code {
         args.model.clone().unwrap_or_else(|| "haiku".into())
+    } else if antigravity {
+        args.model
+            .clone()
+            .unwrap_or_else(|| daas::antigravity::DEFAULT_MODEL.into())
     } else {
         llm.model.clone()
+    };
+    let agent_provider_label = if claude_code {
+        "claude-code"
+    } else if antigravity {
+        "antigravity"
+    } else {
+        llm.provider.as_str()
     };
 
     if llm.api_key.is_empty() && llm.provider != "ollama" {
@@ -312,11 +344,7 @@ async fn main() {
 
     let mut agent = PiAgent::new(
         pi_bin,
-        if claude_code {
-            "claude-code".into()
-        } else {
-            llm.provider.clone()
-        },
+        agent_provider_label.to_string(),
         agent_model.clone(),
         llm.api_key.clone(),
     )
@@ -358,15 +386,7 @@ async fn main() {
     // ── Run the detonation ────────────────────────────────────────────
     if args.output == "human" || args.verbose {
         eprintln!("🔬 Spinning up detonation chamber...");
-        eprintln!(
-            "   Agent:     {} / {}",
-            if claude_code {
-                "claude-code"
-            } else {
-                llm.provider.as_str()
-            },
-            agent_model
-        );
+        eprintln!("   Agent:     {} / {}", agent_provider_label, agent_model);
         eprintln!(
             "   Isolation: {}",
             if args.firecracker {
@@ -460,6 +480,7 @@ fn key_env_for(provider: &str) -> &'static str {
         "openrouter" => "OPENROUTER_API_KEY",
         "openai" => "OPENAI_API_KEY",
         "anthropic" => "ANTHROPIC_API_KEY",
+        "gemini" => "GEMINI_API_KEY",
         _ => "DAAS_LLM_API_KEY",
     }
 }
@@ -470,40 +491,52 @@ fn env_nonempty(k: &str) -> Option<String> {
 
 /// Resolve provider, model, key and base URL. Priority: CLI flags, then
 /// DAAS_LLM_* variables, then whichever provider key is present
-/// (OpenRouter → OpenAI → Anthropic), then local Ollama.
+/// (OpenRouter → OpenAI → Anthropic → Gemini), then local Ollama.
 fn detect_llm_provider(cli_provider: Option<String>, cli_model: Option<String>) -> LlmConfig {
+    resolve_llm_provider(cli_provider, cli_model, env_nonempty)
+}
+
+fn resolve_llm_provider(
+    cli_provider: Option<String>,
+    cli_model: Option<String>,
+    lookup: impl Fn(&str) -> Option<String>,
+) -> LlmConfig {
     let provider = cli_provider
-        .or_else(|| env_nonempty("DAAS_LLM_PROVIDER"))
+        .or_else(|| lookup("DAAS_LLM_PROVIDER"))
         .unwrap_or_else(|| {
-            if env_nonempty("OPENROUTER_API_KEY").is_some() {
+            if lookup("OPENROUTER_API_KEY").is_some() {
                 "openrouter"
-            } else if env_nonempty("OPENAI_API_KEY").is_some() {
+            } else if lookup("OPENAI_API_KEY").is_some() {
                 "openai"
-            } else if env_nonempty("ANTHROPIC_API_KEY").is_some() {
+            } else if lookup("ANTHROPIC_API_KEY").is_some() {
                 "anthropic"
+            } else if lookup("GEMINI_API_KEY").is_some() {
+                "gemini"
             } else {
                 "ollama"
             }
             .to_string()
         });
 
-    let api_key = env_nonempty("DAAS_LLM_API_KEY")
-        .or_else(|| env_nonempty(key_env_for(&provider)))
+    let api_key = lookup("DAAS_LLM_API_KEY")
+        .or_else(|| lookup(key_env_for(&provider)))
         .unwrap_or_default();
 
     let model = cli_model
-        .or_else(|| env_nonempty("DAAS_LLM_MODEL"))
+        .or_else(|| lookup("DAAS_LLM_MODEL"))
         .unwrap_or_else(|| match provider.as_str() {
             "openrouter" => "z-ai/glm-5.3-flash".into(),
             "openai" => "gpt-4o-mini".into(),
             "anthropic" => "claude-haiku-5-5".into(),
+            "gemini" => "gemini-3.8-flash".into(),
             _ => "llama3.2".into(),
         });
 
-    let api_base = env_nonempty("DAAS_LLM_API_BASE").unwrap_or_else(|| match provider.as_str() {
+    let api_base = lookup("DAAS_LLM_API_BASE").unwrap_or_else(|| match provider.as_str() {
         "openrouter" => "https://openrouter.ai/api/v1".into(),
         "openai" => "https://api.openai.com/v1".into(),
         "anthropic" => "https://api.anthropic.com/v1".into(),
+        "gemini" => "https://generativelanguage.googleapis.com/v1beta/openai".into(),
         _ => "http://localhost:11434/v1".into(),
     });
 
@@ -560,5 +593,82 @@ fn print_human_report(report: &DetonationReport, verbose: bool) {
         for e in &report.behavioral_timeline {
             println!("  [{:?}] {}", e.severity, e.description);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_llm_provider;
+    use std::collections::HashMap;
+
+    fn env_map(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        let map: HashMap<String, String> = pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect();
+        move |k: &str| map.get(k).cloned().filter(|v| !v.trim().is_empty())
+    }
+
+    #[test]
+    fn gemini_auto_detected_from_gemini_api_key() {
+        let cfg = resolve_llm_provider(None, None, env_map(&[("GEMINI_API_KEY", "test-gem-key")]));
+        assert_eq!(cfg.provider, "gemini");
+        assert_eq!(cfg.api_key, "test-gem-key");
+        assert_eq!(cfg.model, "gemini-3.8-flash");
+        assert_eq!(
+            cfg.api_base,
+            "https://generativelanguage.googleapis.com/v1beta/openai"
+        );
+    }
+
+    #[test]
+    fn explicit_gemini_provider_overrides_openrouter_key() {
+        let cfg = resolve_llm_provider(
+            Some("gemini".into()),
+            Some("gemini-3.5-flash-lite".into()),
+            env_map(&[
+                ("OPENROUTER_API_KEY", "or-key"),
+                ("GEMINI_API_KEY", "gem-key"),
+            ]),
+        );
+        assert_eq!(cfg.provider, "gemini");
+        assert_eq!(cfg.api_key, "gem-key");
+        assert_eq!(cfg.model, "gemini-3.5-flash-lite");
+        assert_eq!(
+            cfg.api_base,
+            "https://generativelanguage.googleapis.com/v1beta/openai"
+        );
+    }
+
+    #[test]
+    fn openrouter_takes_precedence_over_gemini_by_default() {
+        let cfg = resolve_llm_provider(
+            None,
+            None,
+            env_map(&[
+                ("OPENROUTER_API_KEY", "or-key"),
+                ("GEMINI_API_KEY", "gem-key"),
+            ]),
+        );
+        assert_eq!(cfg.provider, "openrouter");
+        assert_eq!(cfg.api_key, "or-key");
+    }
+
+    #[test]
+    fn daas_overrides_apply_to_gemini() {
+        let cfg = resolve_llm_provider(
+            Some("gemini".into()),
+            None,
+            env_map(&[
+                ("GEMINI_API_KEY", "gem-key"),
+                ("DAAS_LLM_API_KEY", "override-key"),
+                ("DAAS_LLM_MODEL", "gemini-flash-latest"),
+                ("DAAS_LLM_API_BASE", "https://proxy.example/v1"),
+            ]),
+        );
+        assert_eq!(cfg.provider, "gemini");
+        assert_eq!(cfg.api_key, "override-key");
+        assert_eq!(cfg.model, "gemini-flash-latest");
+        assert_eq!(cfg.api_base, "https://proxy.example/v1");
     }
 }

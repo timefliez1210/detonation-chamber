@@ -43,6 +43,8 @@ def run_case(case, args, rep):
         "--persona", args.persona, "--framing", args.framing,
         "--max-turns", str(args.max_turns), "--timeout", str(args.timeout),
     ]
+    if args.provider:
+        cmd += ["--provider", args.provider]
     if args.model:
         cmd += ["--model", args.model]
     if args.thinking:
@@ -167,6 +169,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dataset", default=str(Path(__file__).parent / "dataset.jsonl"))
     ap.add_argument("--bin", default=str(DEFAULT_BIN))
+    ap.add_argument("--provider", default=os.environ.get("DAAS_LLM_PROVIDER"))
     ap.add_argument("--model", default=os.environ.get("DAAS_LLM_MODEL"))
     ap.add_argument("--persona", default="trusting", choices=["trusting", "default"])
     ap.add_argument("--framing", default="task", choices=["task", "direct"])

@@ -14,6 +14,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 # Pi coding agent (the detonation agent)
 RUN npm install -g @earendil-works/pi-coding-agent && npm cache clean --force
+# Optional Google Antigravity CLI (`agy`) for `--agent antigravity`:
+#   docker build --build-arg INSTALL_AGY=1 -t detonate .
+ARG INSTALL_AGY=0
+RUN if [ "$INSTALL_AGY" = "1" ]; then \
+        curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr/local/bin \
+        && rm -rf /root/.cache/antigravity; \
+    fi
 COPY --from=builder /app/target/release/detonate /usr/local/bin/detonate
 COPY SKILL.md /opt/detonate/SKILL.md
 COPY pi-extension/ /opt/detonate/pi-extension/

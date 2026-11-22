@@ -12,10 +12,11 @@ The payload comes from the argument, `--payload-file`, or stdin, in that order (
 |---|---|---|
 | `--payload-file FILE` | | Read the payload from a file |
 | `--output json\|human\|quiet` | `json` | Report format. `quiet` = exit code only |
-| `--provider P` | auto | `openrouter`, `openai`, `anthropic`, `ollama` |
+| `--agent A` | `pi` | Agent harness under test: `pi`, `claude-code`, or `antigravity` |
+| `--provider P` | auto | `openrouter`, `openai`, `anthropic`, `gemini`, `ollama` |
 | `--model M` | per provider | Sandbox agent model (OpenRouter default `z-ai/glm-5.3-flash`) |
 | `--review-model M` | `--model` | Model for layers 5 and 6 |
-| `--thinking L` | Pi default | `off`, `minimal`, `low`, `medium`, `high` |
+| `--thinking L` | Pi default | `off`, `minimal`, `low`, `medium`, `high` (`--effort` for `claude-code` / `antigravity`: `low`–`max`) |
 | `--framing task\|direct` | `task` | `task`: payload is an inbox message the agent handles (indirect injection). `direct`: payload is the user prompt |
 | `--persona trusting\|default` | `trusting` | `trusting`: agent treats the inbox as pre-approved and acts without asking (most sensitive). `default`: stock Pi prompt |
 | `--tools LIST` | `read,bash,edit,write` | Pi tools available to the agent |
@@ -36,12 +37,15 @@ The payload comes from the argument, `--payload-file`, or stdin, in that order (
 
 | Variable | Purpose |
 |---|---|
-| `OPENROUTER_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Provider key. The first one present picks the provider if `--provider`/`DAAS_LLM_PROVIDER` are unset |
+| `OPENROUTER_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` | Provider key. The first one present picks the provider if `--provider`/`DAAS_LLM_PROVIDER` are unset |
 | `DAAS_LLM_API_KEY` | Overrides the provider key |
 | `DAAS_LLM_PROVIDER`, `DAAS_LLM_MODEL` | Defaults for `--provider` / `--model` |
 | `DAAS_LLM_API_BASE` | Any OpenAI-compatible base URL (e.g. vLLM, LM Studio) |
 | `DAAS_TRAFFIC_REVIEW_MODEL` | Default for `--review-model` |
 | `PI_BIN` | Pi executable (default `pi` on PATH) |
+| `CLAUDE_BIN` | Claude Code executable for `--agent claude-code` (default `claude` on PATH) |
+| `AGY_BIN` | Antigravity CLI executable for `--agent antigravity` (default `agy` on PATH) |
+| `GOOGLE_GEMINI_BASE_URL` | Upstream Gemini base URL for `--agent antigravity` (default `https://generativelanguage.googleapis.com`) |
 | `RUST_LOG` | e.g. `daas=info` for engine logs on stderr |
 
 ## Exit codes

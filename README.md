@@ -143,7 +143,8 @@ detonate … --verbose --keep-sandbox           # debugging
 ```
 
 Providers: `openrouter` (default when `OPENROUTER_API_KEY` is set), `openai`, `anthropic`
-(OpenAI-compatible endpoint), `ollama`; any OpenAI-compatible server via `DAAS_LLM_API_BASE`.
+(OpenAI-compatible endpoint), `gemini` (`GEMINI_API_KEY`), `ollama`;
+any OpenAI-compatible server via `DAAS_LLM_API_BASE`.
 Full reference: [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md).
 
 ## Firecracker mode (`--firecracker`)
@@ -177,6 +178,20 @@ detonate --agent claude-code --model sonnet --thinking medium --payload-file x.m
 The credential (a subscription token or `ANTHROPIC_API_KEY`) stays with the local proxy. Claude
 Code inside the sandbox only gets a placeholder key. Tools: Bash, Read, Write, Edit, Glob, Grep,
 and Task, so subagents are tested too. Subscription runs count against your plan's usage limits.
+
+## Antigravity CLI as the agent under test (`--agent antigravity`)
+
+The chamber can also run headless Google Antigravity CLI (`agy -p … --output-format stream-json`)
+with the same honeypot, sandbox, and detection layers:
+
+```bash
+# Put GEMINI_API_KEY in .env (and optionally build Docker with --build-arg INSTALL_AGY=1)
+detonate --agent antigravity --model gemini-4-neon --thinking medium --payload-file x.md --output human
+```
+
+`GEMINI_API_KEY` stays with the local Gemini proxy; `agy` inside the sandbox only sees a
+placeholder key and `GOOGLE_GEMINI_BASE_URL` pointing at `127.0.0.1`. Set `AGY_BIN` if `agy` is
+not on `PATH`.
 
 ## Pi integration
 

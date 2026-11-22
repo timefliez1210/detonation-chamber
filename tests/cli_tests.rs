@@ -116,3 +116,88 @@ fn test_payload_file_reads_file() {
         stderr
     );
 }
+
+#[test]
+fn test_gemini_provider_requires_gemini_api_key() {
+    let empty_env = tempfile::NamedTempFile::new().expect("temp env file");
+    let out = detonate_bin()
+        .arg("--firecracker")
+        .arg("--env-file")
+        .arg(empty_env.path())
+        .arg("--provider")
+        .arg("gemini")
+        .arg("--output")
+        .arg("quiet")
+        .arg("hello")
+        .env_remove("GEMINI_API_KEY")
+        .env_remove("DAAS_LLM_API_KEY")
+        .output()
+        .expect("failed to run detonate");
+
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "should exit 3 when GEMINI_API_KEY is missing"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("GEMINI_API_KEY"),
+        "stderr should mention GEMINI_API_KEY: {stderr}"
+    );
+}
+
+#[test]
+fn test_antigravity_agent_requires_gemini_api_key() {
+    let empty_env = tempfile::NamedTempFile::new().expect("temp env file");
+    let out = detonate_bin()
+        .arg("--env-file")
+        .arg(empty_env.path())
+        .arg("--agent")
+        .arg("antigravity")
+        .arg("--output")
+        .arg("quiet")
+        .arg("hello")
+        .env_remove("GEMINI_API_KEY")
+        .env("DAAS_LLM_API_KEY", "sk-or-unrelated-review-key")
+        .output()
+        .expect("failed to run detonate");
+
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "should exit 3 when GEMINI_API_KEY is missing for --agent antigravity"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("GEMINI_API_KEY"),
+        "stderr should mention GEMINI_API_KEY: {stderr}"
+    );
+}
+
+#[test]
+fn test_antigravity_agent_rejects_firecracker() {
+    let empty_env = tempfile::NamedTempFile::new().expect("temp env file");
+    let out = detonate_bin()
+        .arg("--env-file")
+        .arg(empty_env.path())
+        .arg("--agent")
+        .arg("antigravity")
+        .arg("--firecracker")
+        .arg("--output")
+        .arg("quiet")
+        .arg("hello")
+        .env("GEMINI_API_KEY", "test-key")
+        .output()
+        .expect("failed to run detonate");
+
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "should exit 3 when --agent antigravity is combined with --firecracker"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("firecracker"),
+        "stderr should mention firecracker: {stderr}"
+    );
+}
