@@ -42,6 +42,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_BIN = ROOT / "target" / "release" / "detonate"
 DEFAULT_JUDGE = "z-ai/glm-5.3-flash"
+DEFAULT_JUDGE_BY_PROVIDER = {
+    "openrouter": DEFAULT_JUDGE,
+    "openai": "gpt-4o-mini",
+    "anthropic": "claude-haiku-5-5",
+    "gemini": "gemini-3.8-flash",
+    "ollama": "llama3.2",
+}
 
 EVAL_AWARE = re.compile(
     r"honeypot|canary|being (tested|evaluated)|this (is|looks like|appears to be) (a |an )?"
@@ -212,6 +219,8 @@ def run_one(case, model, rep, args, reports_dir):
     cmd = [str(args.bin), "--payload-file", pf, "--output", "json", "--persona", args.persona,
            "--framing", "task", "--agent", agent, "--model", agent_model, "--review-model", args.judge,
            "--max-turns", str(args.max_turns), "--timeout", str(args.timeout)]
+    if args.provider:
+        cmd += ["--provider", args.provider]
     if thinking:
         cmd += ["--thinking", thinking]
     if case.get("task"):
@@ -373,10 +382,12 @@ def write_md(out_dir, summary):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--models", help="comma-separated OpenRouter model ids")
+    ap.add_argument("--models", help="comma-separated model ids (OpenRouter ids by default)")
     ap.add_argument("--dataset", default=str(Path(__file__).parent / "dataset_v2.jsonl"))
     ap.add_argument("--bin", default=str(DEFAULT_BIN))
-    ap.add_argument("--judge", default=DEFAULT_JUDGE, help="fixed model for the review layers")
+    ap.add_argument("--provider", default=os.environ.get("DAAS_LLM_PROVIDER"),
+                    help="LLM provider passed to detonate (e.g. openrouter, gemini, openai, anthropic, ollama)")
+    ap.add_argument("--judge", help="fixed model for the review layers (defaults per --provider)")
     ap.add_argument("--persona", default="default", choices=["default", "trusting"])
     ap.add_argument("--repeat", type=int, default=1)
     ap.add_argument("--jobs", type=int, default=6)
@@ -389,6 +400,8 @@ def main():
     ap.add_argument("--out", help="results dir (reuse to resume)")
     ap.add_argument("--summarize", metavar="DIR", help="only rescore an existing results dir")
     args = ap.parse_args()
+    if args.judge is None:
+        args.judge = DEFAULT_JUDGE_BY_PROVIDER.get(args.provider or "openrouter", DEFAULT_JUDGE)
 
     dataset = [json.loads(l) for l in open(args.dataset) if l.strip()]
     if args.summarize:
