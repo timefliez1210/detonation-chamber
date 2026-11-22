@@ -12,7 +12,7 @@ The payload comes from the argument, `--payload-file`, or stdin, in that order (
 |---|---|---|
 | `--payload-file FILE` | | Read the payload from a file |
 | `--output json\|human\|quiet` | `json` | Report format. `quiet` = exit code only |
-| `--provider P` | auto | `openrouter`, `openai`, `anthropic`, `ollama` |
+| `--provider P` | auto | `openrouter`, `openai`, `anthropic`, `gemini`, `ollama` |
 | `--model M` | per provider | Sandbox agent model (OpenRouter default `z-ai/glm-5.3-flash`) |
 | `--review-model M` | `--model` | Model for layers 5 and 6 |
 | `--thinking L` | Pi default | `off`, `minimal`, `low`, `medium`, `high` |
@@ -36,7 +36,7 @@ The payload comes from the argument, `--payload-file`, or stdin, in that order (
 
 | Variable | Purpose |
 |---|---|
-| `OPENROUTER_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Provider key. The first one present picks the provider if `--provider`/`DAAS_LLM_PROVIDER` are unset |
+| `OPENROUTER_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` | Provider key. The first one present picks the provider if `--provider`/`DAAS_LLM_PROVIDER` are unset |
 | `DAAS_LLM_API_KEY` | Overrides the provider key |
 | `DAAS_LLM_PROVIDER`, `DAAS_LLM_MODEL` | Defaults for `--provider` / `--model` |
 | `DAAS_LLM_API_BASE` | Any OpenAI-compatible base URL (e.g. vLLM, LM Studio) |

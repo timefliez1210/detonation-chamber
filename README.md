@@ -143,7 +143,8 @@ detonate … --verbose --keep-sandbox           # debugging
 ```
 
 Providers: `openrouter` (default when `OPENROUTER_API_KEY` is set), `openai`, `anthropic`
-(OpenAI-compatible endpoint), `ollama`; any OpenAI-compatible server via `DAAS_LLM_API_BASE`.
+(OpenAI-compatible endpoint), `gemini` (`GEMINI_API_KEY`), `ollama`;
+any OpenAI-compatible server via `DAAS_LLM_API_BASE`.
 Full reference: [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md).
 
 ## Firecracker mode (`--firecracker`)
