@@ -67,11 +67,14 @@ struct Args {
     #[arg(long, default_value = "task", value_parser = ["task", "direct"])]
     framing: String,
 
-    /// Agent harness under test: "pi" (default; model via --provider/--model)
-    /// or "claude-code" (headless Claude Code; --model is a Claude model such
-    /// as haiku/sonnet/opus; auth from CLAUDE_CODE_OAUTH_TOKEN or
-    /// ANTHROPIC_API_KEY, which never enter the sandbox)
-    #[arg(long, default_value = "pi", value_parser = ["pi", "claude-code"])]
+    /// Agent harness under test: "pi" (default; model via --provider/--model),
+    /// "claude-code" (headless Claude Code; --model is a Claude model such as
+    /// haiku/sonnet/opus; auth from CLAUDE_CODE_OAUTH_TOKEN or
+    /// ANTHROPIC_API_KEY, which never enter the sandbox), or "antigravity"
+    /// (headless Google Antigravity CLI `agy`; --model is a Gemini model such
+    /// as gemini-3.8-flash or gemini-4-neon; auth from GEMINI_API_KEY, which
+    /// never enters the sandbox)
+    #[arg(long, default_value = "pi", value_parser = ["pi", "claude-code", "antigravity"])]
     agent: String,
 
     /// The user's request for task framing (default: "handle the inbox
@@ -88,8 +91,8 @@ struct Args {
     persona: String,
 
     /// Thinking level for the test agent: Pi --thinking (off, minimal, low,
-    /// medium, high) or, with --agent claude-code, --effort (low, medium,
-    /// high, xhigh, max)
+    /// medium, high) or, with --agent claude-code / antigravity, --effort
+    /// (low, medium, high, xhigh, max)
     #[arg(long)]
     thinking: Option<String>,
 
@@ -214,12 +217,14 @@ async fn main() {
     }
 
     // ── Detect LLM provider ───────────────────────────────────────────
-    // With --agent claude-code, --model names the Claude model under test; the
-    // LLM provider config below is then only used for the review layers.
+    // With --agent claude-code or --agent antigravity, --model names the model
+    // under test; the LLM provider config below is only used for the review
+    // layers.
     let claude_code = args.agent == "claude-code";
+    let antigravity = args.agent == "antigravity";
     let llm = detect_llm_provider(
         args.provider.clone(),
-        if claude_code {
+        if claude_code || antigravity {
             None
         } else {
             args.model.clone()
@@ -241,13 +246,40 @@ async fn main() {
             std::process::exit(3);
         }
         daas::pi_agent::AgentKind::ClaudeCode { auth }
+    } else if antigravity {
+        if args.firecracker {
+            eprintln!("--agent antigravity is not supported with --firecracker yet.");
+            std::process::exit(3);
+        }
+        let api_key = match env_nonempty("GEMINI_API_KEY") {
+            Some(k) => k,
+            None => {
+                eprintln!("--agent antigravity needs GEMINI_API_KEY, e.g. in .env.");
+                std::process::exit(3);
+            }
+        };
+        let api_base = env_nonempty("GOOGLE_GEMINI_BASE_URL")
+            .or_else(|| env_nonempty("DAAS_GEMINI_API_BASE"))
+            .unwrap_or_else(|| "https://generativelanguage.googleapis.com".into());
+        daas::pi_agent::AgentKind::Antigravity { api_key, api_base }
     } else {
         daas::pi_agent::AgentKind::Pi
     };
     let agent_model = if claude_code {
         args.model.clone().unwrap_or_else(|| "haiku".into())
+    } else if antigravity {
+        args.model
+            .clone()
+            .unwrap_or_else(|| daas::antigravity::DEFAULT_MODEL.into())
     } else {
         llm.model.clone()
+    };
+    let agent_provider_label = if claude_code {
+        "claude-code"
+    } else if antigravity {
+        "antigravity"
+    } else {
+        llm.provider.as_str()
     };
 
     if llm.api_key.is_empty() && llm.provider != "ollama" {
@@ -312,11 +344,7 @@ async fn main() {
 
     let mut agent = PiAgent::new(
         pi_bin,
-        if claude_code {
-            "claude-code".into()
-        } else {
-            llm.provider.clone()
-        },
+        agent_provider_label.to_string(),
         agent_model.clone(),
         llm.api_key.clone(),
     )
@@ -358,15 +386,7 @@ async fn main() {
     // ── Run the detonation ────────────────────────────────────────────
     if args.output == "human" || args.verbose {
         eprintln!("🔬 Spinning up detonation chamber...");
-        eprintln!(
-            "   Agent:     {} / {}",
-            if claude_code {
-                "claude-code"
-            } else {
-                llm.provider.as_str()
-            },
-            agent_model
-        );
+        eprintln!("   Agent:     {} / {}", agent_provider_label, agent_model);
         eprintln!(
             "   Isolation: {}",
             if args.firecracker {

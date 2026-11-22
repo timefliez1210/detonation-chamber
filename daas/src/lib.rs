@@ -6,6 +6,7 @@
 
 pub mod agent;
 pub mod agent_review;
+pub mod antigravity;
 pub mod behavioral;
 pub mod canary;
 pub mod claude_code;

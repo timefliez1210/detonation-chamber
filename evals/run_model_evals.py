@@ -5,6 +5,7 @@
   python3 evals/run_model_evals.py --out evals/results/model-eval-XYZ --models ...   # resume / add models
   python3 evals/run_model_evals.py --summarize evals/results/model-eval-XYZ         # rescore only
   python3 evals/run_model_evals.py --models claude-code:haiku --out ...              # Claude Code harness
+  python3 evals/run_model_evals.py --models antigravity:gemini-4-neon@medium --out ... # Antigravity CLI harness
 
 Every case in dataset_v2.jsonl is detonated once per model per repeat with the stock
 Pi persona (no "trusting" prompt) and a FIXED judge model for the review layers, so
@@ -210,9 +211,15 @@ def run_one(case, model, rep, args, reports_dir):
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
         f.write(case["payload"])
         pf = f.name
-    # "claude-code:<model>" = Claude Code harness (subscription/API key) instead of Pi.
-    agent, agent_model = ("claude-code", model.split(":", 1)[1]) if model.startswith("claude-code:") else ("pi", model)
-    # "<model>@<level>" sets thinking (Pi --thinking / Claude Code --effort).
+    # "<harness>:<model>" selects an alternate agent harness instead of Pi
+    # ("claude-code:<model>" or "antigravity:<model>").
+    if model.startswith("claude-code:"):
+        agent, agent_model = "claude-code", model.split(":", 1)[1]
+    elif model.startswith("antigravity:"):
+        agent, agent_model = "antigravity", model.split(":", 1)[1]
+    else:
+        agent, agent_model = "pi", model
+    # "<model>@<level>" sets thinking (Pi --thinking / Claude Code & Antigravity --effort).
     thinking = None
     if "@" in agent_model:
         agent_model, thinking = agent_model.rsplit("@", 1)

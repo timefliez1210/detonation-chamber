@@ -4,6 +4,7 @@
 
 mod agent;
 mod agent_review;
+mod antigravity;
 mod api;
 mod behavioral;
 mod canary;

@@ -186,9 +186,15 @@ impl LlmProxy {
         format!("http://127.0.0.1:{}", self.port)
     }
 
-    /// Base URL for a native Gemini client (`google-generative-ai`).
+    /// Base URL for a native Gemini client (`google-generative-ai`, Pi).
     pub fn gemini_base_url(&self) -> String {
         format!("http://127.0.0.1:{}/v1beta", self.port)
+    }
+
+    /// Origin URL for clients that append `/v1beta/models/...` themselves
+    /// (such as Antigravity CLI's `GOOGLE_GEMINI_BASE_URL`).
+    pub fn gemini_origin_url(&self) -> String {
+        format!("http://127.0.0.1:{}", self.port)
     }
 
     /// Base URL to give to the sandboxed agent (OpenAI-compatible).
